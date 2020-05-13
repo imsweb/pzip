@@ -56,6 +56,29 @@ class PZip:
     class Flags(enum.IntFlag):
         COMPRESSED = 1
 
+    class Close(enum.Enum):
+        REWIND = -1
+        NEVER = 0
+        ALWAYS = 1
+        AUTOMATIC = 2
+
+        def close(self, fileobj):
+            if self == PZip.Close.AUTOMATIC:
+                # Rewind (and leave open) if the fileobj is a BytesIO, otherwise close unless it's interactive.
+                if isinstance(fileobj, io.BytesIO):
+                    fileobj.seek(0)
+                elif not fileobj.isatty():
+                    fileobj.close()
+            elif self == PZip.Close.ALWAYS:
+                # Always close the underlying fileobj.
+                fileobj.close()
+            elif self == PZip.Close.NEVER:
+                # Leave the underlying fileobj open.
+                pass
+            elif self == PZip.Close.REWIND:
+                # Rewind (and leave open) the fileobj.
+                fileobj.seek(0)
+
     def __init__(
         self,
         fileobj,
@@ -66,6 +89,7 @@ class PZip:
         nonce=None,
         compress=True,
         decompress=True,
+        close=Close.AUTOMATIC,
     ):
         self.mode = PZip.Mode(mode)
         if isinstance(fileobj, str):
@@ -75,6 +99,7 @@ class PZip:
         self.version = 1
         self.flags = PZip.Flags(0)
         self.size = 0
+        self.close_mode = PZip.Close(close)
         if secret_key is None:
             # Allow a default_key implementation for using things like Django's SECRET_KEY setting.
             secret_key = self.default_key()
@@ -227,10 +252,7 @@ class PZip:
                     self.fileobj.write(self.context.update(remaining))
             self.fileobj.write(self.context.finalize())
             self.update_header(self.context.tag)
-        if isinstance(self.fileobj, io.BytesIO):
-            self.fileobj.seek(0)
-        elif not self.fileobj.isatty():
-            self.fileobj.close()
+        self.close_mode.close(self.fileobj)
 
     # These are taken from Django, so this can be used in places where it expects a File object. They are also
     # generally useful to be able to stream a file with a specified chunk size.
@@ -267,9 +289,9 @@ def copy(infile, outfile, progress=None):
             progress.update(len(chunk))
     if progress:
         progress.close()
-    if not infile.isatty():
+    if not infile.isatty() and not isinstance(infile, io.BytesIO):
         infile.close()
-    if not outfile.isatty():
+    if not outfile.isatty() and not isinstance(outfile, io.BytesIO):
         outfile.close()
 
 
@@ -324,7 +346,7 @@ def get_files(filename, mode, key, options):
     return infile, outfile, total
 
 
-def main():
+def main(*args):
     logging.basicConfig(format="{levelname} {message}", style="{")
     parser = argparse.ArgumentParser()
     parser.add_argument("-z", "--compress", action="store_true", default=False, help="force compression")
@@ -337,7 +359,7 @@ def main():
     parser.add_argument("-x", "--extract", action="store_true", default=False, help="extract data, no decompression")
     parser.add_argument("-q", "--quiet", action="store_true", default=False, help="no output")
     parser.add_argument("files", metavar="file", nargs="*", help="files to encrypt or decrypt")
-    options = parser.parse_args()
+    options = parser.parse_args(args=args or None)
     if options.compress and options.decompress:
         die("cannot specify -z and -d together")
     files = []

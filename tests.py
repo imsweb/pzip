@@ -1,8 +1,11 @@
 import io
 import os
+import sys
+import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
-from pzip import InvalidFile, PZip
+from pzip import InvalidFile, PZip, main
 
 TEST_SECRET_KEY = os.urandom(32)
 
@@ -22,6 +25,7 @@ class PZipTests(unittest.TestCase):
         with TestPZip(buf, PZip.Mode.ENCRYPT) as f:
             f.write(plaintext)
         self.assertEqual(f.size, len(plaintext))
+        self.assertLess(len(buf.getvalue()), f.size)
         with TestPZip(buf, PZip.Mode.DECRYPT) as f:
             self.assertEqual(f.read(), plaintext)
 
@@ -86,6 +90,66 @@ class PZipTests(unittest.TestCase):
             self.assertFalse(f.seekable())
             with self.assertRaises(io.UnsupportedOperation):
                 f.write(b"")
+
+    def test_close_modes(self):
+        buf = io.BytesIO()
+        TestPZip(buf, PZip.Mode.ENCRYPT, close=PZip.Close.ALWAYS).close()
+        self.assertTrue(buf.closed)
+        buf = io.BytesIO()
+        TestPZip(buf, PZip.Mode.ENCRYPT, close=PZip.Close.NEVER).close()
+        self.assertFalse(buf.closed)
+        with TestPZip(buf, PZip.Mode.ENCRYPT, close=PZip.Close.REWIND) as f:
+            f.write(b"advance that pointer")
+        self.assertFalse(buf.closed)
+        self.assertEqual(buf.tell(), 0)
+
+
+class redirect:
+    def __init__(self, name, data=b""):
+        self.name = name
+        self.buf = io.BytesIO(data)
+
+    def __enter__(self):
+        self.fd = getattr(sys, self.name)
+        fake = MagicMock()
+        fake.buffer = self.buf
+        setattr(sys, self.name, fake)
+        return self.buf
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        setattr(sys, self.name, self.fd)
+
+
+class CommandLineTests(unittest.TestCase):
+    @patch("getpass.getpass")
+    def test_encrypt_decrypt(self, getpass):
+        getpass.return_value = "secret"
+        plaintext = b"I am a real file."
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(plaintext)
+            f.seek(0)
+            main("-q", f.name)
+            self.assertTrue(os.path.exists(f.name + ".pz"))
+            main("-q", f.name + ".pz")
+            self.assertTrue(os.path.exists(f.name))
+            f.seek(0)
+            self.assertEqual(f.read(), plaintext)
+            os.remove(f.name)
+
+    @patch("getpass.getpass")
+    def test_stdin_stdout(self, getpass):
+        getpass.return_value = "secret"
+        plaintext = "ƒøôβå®".encode("utf-8")
+        with redirect("stdout") as stdout:
+            with redirect("stdin", plaintext):
+                # Encrypt from STDIN, write to STDOUT.
+                main("-z", "-c", "-")
+        ciphertext = stdout.getvalue()
+        with redirect("stdout") as stdout:
+            with redirect("stdin", ciphertext):
+                # Decrypt from STDIN, write to STDOUT.
+                main("-d", "-c")
+        self.assertEqual(plaintext, stdout.getvalue())
 
 
 if __name__ == "__main__":
