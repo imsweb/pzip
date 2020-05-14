@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 __version_info__ = tuple(int(num) for num in __version__.split("."))
 
 
@@ -84,6 +84,7 @@ class PZip:
         fileobj,
         mode,
         secret_key=None,
+        name=None,
         key_size=None,
         iterations=None,
         nonce=None,
@@ -96,6 +97,7 @@ class PZip:
             self.fileobj = open(fileobj, self.mode.value)
         else:
             self.fileobj = fileobj
+        self.name = name or getattr(self.fileobj, "name", None)
         self.version = 1
         self.flags = PZip.Flags(0)
         self.size = 0
