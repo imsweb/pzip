@@ -1,3 +1,4 @@
+import gzip
 import io
 import os
 import sys
@@ -49,17 +50,20 @@ class PZipTests(unittest.TestCase):
             self.assertEqual(f.read(), plaintext)
 
     def test_integrity(self):
-        buf = io.BytesIO()
-        plaintext = os.urandom(1024)
-        with TestPZip(buf, PZip.Mode.ENCRYPT, compress=False) as f:
-            f.write(plaintext)
-        # Alter a byte after the initial nonce check value.
-        contents = buf.getbuffer()
-        contents[f.header_size + 20] = contents[f.header_size + 20] ^ 128
-        # The file should have a valid header and nonce check, but fail upon reading/authentication.
-        with TestPZip(io.BytesIO(contents), PZip.Mode.DECRYPT) as f:
-            with self.assertRaises(InvalidFile):
-                f.read()
+        plaintext = os.urandom(1024) * 128
+        for compress in (False, True):
+            buf = io.BytesIO()
+            with TestPZip(buf, PZip.Mode.ENCRYPT, compress=compress) as f:
+                f.write(plaintext)
+            # Alter some bytes after the initial nonce check value.
+            contents = buf.getbuffer()
+            for i in range(50, 100):
+                contents[f.header_size + i] = contents[f.header_size + i] ^ 128
+            # The file should have a valid header and nonce check, but fail upon reading/authentication.
+            with TestPZip(io.BytesIO(contents), PZip.Mode.DECRYPT) as f:
+                with self.assertRaises(InvalidFile):
+                    # Cover both compression integrity failures during streaming reads, and authentication failures.
+                    f.read(200 if compress else None)
 
     def test_iter_read(self):
         buf = io.BytesIO()
@@ -128,13 +132,21 @@ class CommandLineTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(delete=False) as f:
             f.write(plaintext)
             f.seek(0)
-            main("-q", f.name)
+            # Use 1 iteration for speed.
+            main("-q", "-i1", f.name)
+            self.assertFalse(os.path.exists(f.name))
             self.assertTrue(os.path.exists(f.name + ".pz"))
             main("-q", f.name + ".pz")
             self.assertTrue(os.path.exists(f.name))
+            self.assertFalse(os.path.exists(f.name + ".pz"))
             f.seek(0)
             self.assertEqual(f.read(), plaintext)
-            os.remove(f.name)
+            main("-q", "-i1", "-o", f.name + ".enc", f.name)
+            main("-q", "-x", f.name + ".enc")
+            self.assertTrue(os.path.exists(f.name + ".gz"))
+            with gzip.open(f.name + ".gz") as gz:
+                self.assertTrue(gz.read(), plaintext)
+            os.remove(f.name + ".gz")
 
     @patch("getpass.getpass")
     def test_stdin_stdout(self, getpass):
@@ -142,8 +154,8 @@ class CommandLineTests(unittest.TestCase):
         plaintext = "ƒøôβå®".encode("utf-8")
         with redirect("stdout") as stdout:
             with redirect("stdin", plaintext):
-                # Encrypt from STDIN, write to STDOUT.
-                main("-z", "-c", "-")
+                # Encrypt from STDIN, write to STDOUT. Use 1 iteration for speed.
+                main("-z", "-i1", "-c", "-")
         ciphertext = stdout.getvalue()
         with redirect("stdout") as stdout:
             with redirect("stdin", ciphertext):

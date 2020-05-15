@@ -226,7 +226,7 @@ class PZip:
                     data = self.decompressor.decompress(data)
                     # XXX: deal with this, ideally with a test
                     assert not self.decompressor.unconsumed_tail
-                except (zlib.error, OSError) as e:
+                except zlib.error as e:
                     raise InvalidFile() from e
             done = size is None or size < 0
         else:
@@ -239,7 +239,7 @@ class PZip:
                     if hasattr(self.decompressor, "flush"):
                         remaining += self.decompressor.flush()
                 data += remaining
-            except (InvalidTag, zlib.error, OSError) as e:
+            except (InvalidTag, zlib.error) as e:
                 raise InvalidFile() from e
         return data
 
@@ -309,7 +309,7 @@ def get_files(filename, mode, key, options):
     """
     infile = None
     outfile = None
-    total = 0
+    total = None
     if options.stdout:
         outfile = sys.stdout.buffer
     elif options.output:
@@ -326,7 +326,7 @@ def get_files(filename, mode, key, options):
             # If using STDIN and no output was specified, use a default filename.
             outfile = outfile or open("output.pz", "wb")
         # Wrap the output file in a PZip object.
-        outfile = PZip(outfile, mode, key, compress=not options.nozip)
+        outfile = PZip(outfile, mode, key, iterations=options.iterations, compress=not options.nozip)
     elif mode == PZip.Mode.DECRYPT:
         infile = PZip(filename or sys.stdin.buffer, mode, key, decompress=not options.extract)
         # PZip's read will return uncompressed data by default, so this should be the uncompressed plaintext size.
@@ -356,6 +356,9 @@ def main(*args):
     parser.add_argument("-k", "--keep", action="store_true", default=False, help="keep input files")
     parser.add_argument("-c", "--stdout", action="store_true", default=False, help="write to stdout (implies -k -q)")
     parser.add_argument("-e", "--key", help="encrypt using key file")
+    parser.add_argument(
+        "-i", "--iterations", type=int, default=PZip.DEFAULT_ITERATIONS, help="number of PBKDF2 iterations"
+    )
     parser.add_argument("-o", "--output", help="specify outfile file name")
     parser.add_argument("-n", "--nozip", action="store_true", default=False, help="encrypt only, no compression")
     parser.add_argument("-x", "--extract", action="store_true", default=False, help="extract data, no decompression")
@@ -406,9 +409,9 @@ def main(*args):
     for filename in files:
         infile, outfile, total = get_files(filename, mode, key, options)
         progress = (
-            None
-            if options.quiet
-            else tqdm.tqdm(desc=filename or "STDIN", total=total, unit="B", unit_scale=True, unit_divisor=1024)
+            tqdm.tqdm(desc=filename, total=total, unit="B", unit_scale=True, unit_divisor=1024)
+            if filename and total and not options.quiet
+            else None
         )
         copy(infile, outfile, progress=progress)
         if filename and not options.keep:

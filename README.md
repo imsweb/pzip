@@ -1,6 +1,11 @@
 # PZip
 
-PZip is an encrypted file format (with optional compression), a command-line tool, and a Python file-like interface.
+PZip is an encrypted file format (with optional gzip compression), a command-line tool, and a Python file-like
+interface.
+
+## Installation
+
+`pip install pzip`
 
 ## Command Line Usage
 
@@ -9,6 +14,13 @@ For a full list of options, run `pzip -h`. Basic usage is summarized below:
 ```
 pzip --key keyfile sensitive_data.csv
 pzip --key keyfile sensitive_data.csv.pz
+```
+
+Piping and outputting to stdout is also supported:
+
+```
+tar cf - somedir | pzip -z --key keyfile -o somedir.pz
+pzip --key keyfile -c somedir.pz | tar xf -
 ```
 
 ## Python Usage
@@ -54,3 +66,13 @@ the nonce repeated. The header is big/network endian, with the following fields/
   * PBKDF2 salt (16 bytes)
   * GCM nonce/IV (16 bytes)
   * GCM authentication tag (16 bytes)
+
+## FAQ
+
+*Why does this exist?*
+
+Nothing PZip does couldn't be done by chaining together existing tools - compressing with `gzip`, deriving a key and
+encrypting with `openssl`, generating a MAC (if not using GCM), etc. But at that point, you're probably writing a
+script to automate the process, tacking on bits of data here and there (or writing multiple files). PZip simply wraps
+that in a nice package and documents a file format. Plus having a Python interface you can pretty much treat as a file
+is super nice.
