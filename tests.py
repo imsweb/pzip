@@ -129,24 +129,25 @@ class CommandLineTests(unittest.TestCase):
     def test_encrypt_decrypt(self, getpass):
         getpass.return_value = "secret"
         plaintext = b"I am a real file."
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            f.write(plaintext)
-            f.seek(0)
+        with tempfile.TemporaryDirectory() as root:
+            name = os.path.join(root, "tempfile")
+            with open(name, "wb") as f:
+                f.write(plaintext)
             # Use 1 iteration for speed.
-            main("-q", "-i1", f.name)
-            self.assertFalse(os.path.exists(f.name))
-            self.assertTrue(os.path.exists(f.name + ".pz"))
-            main("-q", f.name + ".pz")
-            self.assertTrue(os.path.exists(f.name))
-            self.assertFalse(os.path.exists(f.name + ".pz"))
-            f.seek(0)
-            self.assertEqual(f.read(), plaintext)
-            main("-q", "-i1", "-o", f.name + ".enc", f.name)
-            main("-q", "-x", f.name + ".enc")
-            self.assertTrue(os.path.exists(f.name + ".gz"))
-            with gzip.open(f.name + ".gz") as gz:
+            main("-q", "-i1", name)
+            self.assertFalse(os.path.exists(name))
+            self.assertTrue(os.path.exists(name + ".pz"))
+            main("-q", name + ".pz")
+            self.assertTrue(os.path.exists(name))
+            self.assertFalse(os.path.exists(name + ".pz"))
+            with open(name, "rb") as f:
+                self.assertEqual(f.read(), plaintext)
+            main("-q", "-i1", "-o", name + ".enc", name)
+            main("-q", "-x", name + ".enc")
+            self.assertTrue(os.path.exists(name + ".gz"))
+            with gzip.open(name + ".gz") as gz:
                 self.assertTrue(gz.read(), plaintext)
-            os.remove(f.name + ".gz")
+            os.remove(name + ".gz")
 
     @patch("getpass.getpass")
     def test_stdin_stdout(self, getpass):
