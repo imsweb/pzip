@@ -4,7 +4,6 @@ import argparse
 import enum
 import getpass
 import io
-import logging
 import os
 import secrets
 import struct
@@ -273,8 +272,12 @@ class PZip:
             yield data
 
 
+def log(msg, *args):
+    print(msg.format(*args), file=sys.stderr, flush=True)
+
+
 def die(msg, *args, code=1):
-    logging.critical(msg, *args)
+    log(msg, *args)
     sys.exit(code)
 
 
@@ -358,7 +361,6 @@ def get_files(filename, mode, key, options):
 
 
 def main(*args):
-    logging.basicConfig(format="{levelname} {message}", style="{", level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument("-z", "--compress", action="store_true", default=False, help="force compression")
     parser.add_argument("-d", "--decompress", action="store_true", default=False, help="force decompression")
@@ -397,7 +399,7 @@ def main(*args):
                 die("%s: mode conflict", filename)
             files.append(filename)
         else:
-            logging.warning("%s: no such file", filename)
+            log("{}: no such file", filename)
     if mode is None:
         die("unable to determine mode; specify -z or -d")
     if not files:
@@ -412,14 +414,14 @@ def main(*args):
         with open(options.key, "rb") as f:
             key = f.read()
         if options.password:
-            logging.warning("-p ignored, using key file %s", options.key)
+            log("-p ignored, using key file {}", options.key)
     elif options.password:
         key = options.password.encode("utf-8")
         if options.auto:
-            logging.warning("-a ignored, using password")
+            log("-a ignored, using password")
     elif options.auto:
         token = secrets.token_urlsafe(32)
-        logging.info("encrypting with password: %s", token)
+        log("encrypting with password: {}", token)
         key = token.encode("utf-8")
     else:
         key = getpass.getpass("Key: ")

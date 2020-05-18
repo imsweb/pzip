@@ -111,12 +111,15 @@ class PZipTests(unittest.TestCase):
 class redirect:
     def __init__(self, name, data=b""):
         self.name = name
-        self.buf = io.BytesIO(data)
+        self.buf = io.BytesIO(data) if isinstance(data, bytes) else io.StringIO(data)
 
     def __enter__(self):
         self.fd = getattr(sys, self.name)
-        fake = MagicMock()
-        fake.buffer = self.buf
+        if isinstance(self.buf, io.BytesIO):
+            fake = MagicMock()
+            fake.buffer = self.buf
+        else:
+            fake = self.buf
         setattr(sys, self.name, fake)
         return self.buf
 
@@ -163,6 +166,19 @@ class CommandLineTests(unittest.TestCase):
                 # Decrypt from STDIN, write to STDOUT.
                 main("-d", "-c")
         self.assertEqual(plaintext, stdout.getvalue())
+
+    def test_auto_password(self):
+        plaintext = "ƒøôβå®".encode("utf-8")
+        with tempfile.TemporaryDirectory() as root:
+            name = os.path.join(root, "autofile")
+            with open(name, "wb") as f:
+                f.write(plaintext)
+            with redirect("stderr", "") as stderr:
+                main("-q", "-i1", "-a", name)
+                password = stderr.getvalue().split(": ")[-1].strip()
+            main("-q", "-i1", "-p", password, name + ".pz")
+            with open(name, "rb") as f:
+                self.assertEqual(f.read(), plaintext)
 
 
 if __name__ == "__main__":
