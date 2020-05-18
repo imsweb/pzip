@@ -6,6 +6,7 @@ import getpass
 import io
 import logging
 import os
+import secrets
 import struct
 import sys
 import zlib
@@ -17,7 +18,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 __version_info__ = tuple(int(num) for num in __version__.split("."))
 
 
@@ -313,18 +314,24 @@ def get_files(filename, mode, key, options):
     if options.stdout:
         outfile = sys.stdout.buffer
     elif options.output:
+        if not options.force and os.path.exists(options.output):
+            die("%s: output file exists", options.output)
         outfile = open(options.output, "wb")
     if mode == PZip.Mode.ENCRYPT:
         if filename:
             infile = open(filename, "rb")
             # If not already specified, set output file to <filename>.pz.
-            outfile = outfile or open(filename + ".pz", "wb")
+            if not outfile:
+                if not options.force and os.path.exists(filename + ".pz"):
+                    die("%s: output file exists", filename + ".pz")
+                outfile = open(filename + ".pz", "wb")
             # Progress total will be the size of the input file when encrypting.
             total = os.path.getsize(filename)
         else:
             infile = sys.stdin.buffer
-            # If using STDIN and no output was specified, use a default filename.
-            outfile = outfile or open("output.pz", "wb")
+            # If using STDIN and no output was specified, use STDOUT.
+            if not outfile:
+                outfile = sys.stdout.buffer
         # Wrap the output file in a PZip object.
         outfile = PZip(outfile, mode, key, iterations=options.iterations, compress=not options.nozip)
     elif mode == PZip.Mode.DECRYPT:
@@ -341,6 +348,8 @@ def get_files(filename, mode, key, options):
                     new_filename += ".gz"
                     # Set the progress total to the filesize (minus header), since we aren't decompressing.
                     total = os.path.getsize(filename) - infile.header_size - 16
+                if not options.force and os.path.exists(new_filename):
+                    die("%s: output file exists", new_filename)
                 outfile = open(new_filename, "wb")
             else:
                 # Using STDIN and no output was specified, just dump to STDOUT.
@@ -349,19 +358,22 @@ def get_files(filename, mode, key, options):
 
 
 def main(*args):
-    logging.basicConfig(format="{levelname} {message}", style="{")
+    logging.basicConfig(format="{levelname} {message}", style="{", level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument("-z", "--compress", action="store_true", default=False, help="force compression")
     parser.add_argument("-d", "--decompress", action="store_true", default=False, help="force decompression")
     parser.add_argument("-k", "--keep", action="store_true", default=False, help="keep input files")
     parser.add_argument("-c", "--stdout", action="store_true", default=False, help="write to stdout (implies -k -q)")
+    parser.add_argument("-f", "--force", action="store_true", default=False, help="overwrite existing output files")
+    parser.add_argument("-a", "--auto", action="store_true", help="automatically generate and output a key")
     parser.add_argument("-e", "--key", help="encrypt using key file")
+    parser.add_argument("-p", "--password", help="encrypt using password as key")
     parser.add_argument(
         "-i", "--iterations", type=int, default=PZip.DEFAULT_ITERATIONS, help="number of PBKDF2 iterations"
     )
     parser.add_argument("-o", "--output", help="specify outfile file name")
     parser.add_argument("-n", "--nozip", action="store_true", default=False, help="encrypt only, no compression")
-    parser.add_argument("-x", "--extract", action="store_true", default=False, help="extract data, no decompression")
+    parser.add_argument("-x", "--extract", action="store_true", default=False, help="extract only, no decompression")
     parser.add_argument("-q", "--quiet", action="store_true", default=False, help="no output")
     parser.add_argument("files", metavar="file", nargs="*", help="files to encrypt or decrypt")
     options = parser.parse_args(args=args or None)
@@ -399,6 +411,16 @@ def main(*args):
     if options.key:
         with open(options.key, "rb") as f:
             key = f.read()
+        if options.password:
+            logging.warning("-p ignored, using key file %s", options.key)
+    elif options.password:
+        key = options.password.encode("utf-8")
+        if options.auto:
+            logging.warning("-a ignored, using password")
+    elif options.auto:
+        token = secrets.token_urlsafe(32)
+        logging.info("encrypting with password: %s", token)
+        key = token.encode("utf-8")
     else:
         key = getpass.getpass("Key: ")
         if mode == PZip.Mode.ENCRYPT:
