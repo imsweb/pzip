@@ -1,3 +1,5 @@
+![CI](https://github.com/imsweb/pzip/workflows/CI/badge.svg?branch=master)
+
 # PZip
 
 PZip is an encrypted file format (with optional gzip compression), a command-line tool, and a Python file-like
@@ -23,6 +25,15 @@ tar cf - somedir | pzip -z --key keyfile -o somedir.pz
 pzip --key keyfile -c somedir.pz | tar xf -
 ```
 
+PZip will generate an encryption key automatically, if you want:
+
+```
+pzip -a sensitive_data.csv
+encrypting with password: 7xRLoyHgK6J2-4mUkT3JoklSyfSYxHb1EkMABjasnUc
+
+pzip -p 7xRLoyHgK6J2-4mUkT3JoklSyfSYxHb1EkMABjasnUc sensitive_data.csv.pz
+```
+
 ## Python Usage
 
 ```python
@@ -30,6 +41,7 @@ import os
 from pzip import PZip
 
 key = os.urandom(32)
+
 with PZip("myfile.pz", PZip.Mode.ENCRYPT, key) as f:
     f.write(b"sensitive data")
 
