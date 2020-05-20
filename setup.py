@@ -22,7 +22,7 @@ setup(
     install_requires=["cryptography", "tqdm"],
     entry_points={"console_scripts": ["pzip=pzip:main"]},
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python",
