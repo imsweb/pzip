@@ -19,7 +19,7 @@ setup(
     url="https://github.com/imsweb/pzip",
     license="MIT",
     py_modules=["pzip"],
-    install_requires=["cryptography", "tqdm"],
+    install_requires=["cryptography"],
     entry_points={"console_scripts": ["pzip=pzip:main"]},
     classifiers=[
         "Development Status :: 4 - Beta",

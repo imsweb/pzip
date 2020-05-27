@@ -25,8 +25,7 @@ class PZipTests(unittest.TestCase):
         plaintext = b"Hello, world!\n" * 1000
         with TestPZip(buf, PZip.Mode.ENCRYPT) as f:
             f.write(plaintext)
-        self.assertEqual(f.size, len(plaintext))
-        self.assertLess(len(buf.getvalue()), f.size)
+        self.assertLess(len(buf.getvalue()), len(plaintext))
         with TestPZip(buf, PZip.Mode.DECRYPT) as f:
             self.assertEqual(f.read(), plaintext)
 
@@ -44,8 +43,7 @@ class PZipTests(unittest.TestCase):
         plaintext = b"My voice is my passport. Verify me."
         with TestPZip(buf, PZip.Mode.ENCRYPT, compress=False) as f:
             f.write(plaintext)
-        self.assertEqual(f.size, len(plaintext))
-        self.assertEqual(len(buf.getvalue()), f.size + f.header_size + 16)
+        self.assertEqual(len(buf.getvalue()), len(plaintext) + f.header_size + 12 + 12 + 16)
         with TestPZip(buf, PZip.Mode.DECRYPT) as f:
             self.assertEqual(f.read(), plaintext)
 
@@ -107,6 +105,17 @@ class PZipTests(unittest.TestCase):
         self.assertFalse(buf.closed)
         self.assertEqual(buf.tell(), 0)
 
+    def test_chunked_reads(self):
+        buf = io.BytesIO()
+        plaintext = b"Hello, world!\n"
+        num = 1000
+        with TestPZip(buf, PZip.Mode.ENCRYPT) as f:
+            f.write(plaintext * num)
+        with TestPZip(buf, PZip.Mode.DECRYPT) as f:
+            chunks = list(f.chunks(len(plaintext)))
+            self.assertEqual(len(chunks), num)
+            self.assertEqual(b"".join(chunks), plaintext * num)
+
 
 class redirect:
     def __init__(self, name, data=b""):
@@ -137,16 +146,16 @@ class CommandLineTests(unittest.TestCase):
             with open(name, "wb") as f:
                 f.write(plaintext)
             # Use 1 iteration for speed.
-            main("-q", "-i1", name)
+            main("-i1", name)
             self.assertFalse(os.path.exists(name))
             self.assertTrue(os.path.exists(name + ".pz"))
-            main("-q", name + ".pz")
+            main(name + ".pz")
             self.assertTrue(os.path.exists(name))
             self.assertFalse(os.path.exists(name + ".pz"))
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)
-            main("-q", "-i1", "-o", name + ".enc", name)
-            main("-q", "-x", name + ".enc")
+            main("-i1", "-o", name + ".enc", name)
+            main("-x", name + ".enc")
             self.assertTrue(os.path.exists(name + ".gz"))
             with gzip.open(name + ".gz") as gz:
                 self.assertTrue(gz.read(), plaintext)
@@ -174,9 +183,9 @@ class CommandLineTests(unittest.TestCase):
             with open(name, "wb") as f:
                 f.write(plaintext)
             with redirect("stderr", "") as stderr:
-                main("-q", "-i1", "-a", name)
+                main("-i1", "-a", name)
                 password = stderr.getvalue().split(": ")[-1].strip()
-            main("-q", "-i1", "-p", password, name + ".pz")
+            main("-i1", "-p", password, name + ".pz")
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)
 
