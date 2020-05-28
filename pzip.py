@@ -10,13 +10,14 @@ import struct
 import sys
 import zlib
 
+import tqdm
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-__version__ = "0.9.4"
+__version__ = "0.9.5"
 __version_info__ = tuple(int(num) for num in __version__.split("."))
 
 
@@ -137,7 +138,8 @@ class PZip:
     # nonce size, in bytes (1 bytes)
     # kdf iterations (4 bytes)
     # kdf salt (16 bytes)
-    HEADER_FORMAT = "!{}sBBBBL16s".format(len(MAGIC))
+    # plaintext size (8 bytes)
+    HEADER_FORMAT = "!{}sBBBBL16sQ".format(len(MAGIC))
 
     # 256-bit AES keys by default.
     DEFAULT_KEY_SIZE = 32
@@ -187,6 +189,7 @@ class PZip:
         mode,
         secret_key=None,
         name=None,
+        size=None,
         key_size=None,
         iterations=None,
         salt=None,
@@ -201,6 +204,9 @@ class PZip:
         else:
             self.fileobj = fileobj
         self.name = name or getattr(self.fileobj, "name", None)
+        # For streaming usage, or non-seekable outputs, plaintext size can be passed explicitly.
+        # If this is None, it will be updated after each write, and PZip will try to update the header on close.
+        self.size = size
         self.version = 1
         self.flags = PZip.Flags(0)
         self.close_mode = PZip.Close(close)
@@ -223,6 +229,7 @@ class PZip:
                 self.compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, zlib.MAX_WBITS | 16)
             self.context = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend()).encryptor()
             self.write_header(key_size, salt, iterations, nonce)
+            self.bytes_written = 0
         elif self.mode == PZip.Mode.DECRYPT:
             assert self.fileobj.readable()
             self.read_header(secret_key)
@@ -257,7 +264,15 @@ class PZip:
     def write_header(self, key_size, salt, iterations, nonce):
         self.fileobj.write(
             struct.pack(
-                self.HEADER_FORMAT, self.MAGIC, self.version, self.flags, key_size, len(nonce), iterations, salt
+                self.HEADER_FORMAT,
+                self.MAGIC,
+                self.version,
+                self.flags,
+                key_size,
+                len(nonce),
+                iterations,
+                salt,
+                self.size or 0,
             )
         )
         # Between the header and the encrypted file data is the nonce (twice) - once unencrypted, once encrypted.
@@ -270,7 +285,9 @@ class PZip:
         data = self.fileobj.read(self.header_size)
         if len(data) < self.header_size:
             raise InvalidFile("Invalid header.")
-        magic, version, flags, key_size, nonce_size, iterations, salt = struct.unpack(self.HEADER_FORMAT, data)
+        magic, version, flags, key_size, nonce_size, iterations, salt, self.size = struct.unpack(
+            self.HEADER_FORMAT, data
+        )
         assert magic == self.MAGIC
         assert version == self.version
         self.flags = PZip.Flags(flags)
@@ -292,11 +309,14 @@ class PZip:
     def write(self, data):
         if self.mode != PZip.Mode.ENCRYPT:
             raise io.UnsupportedOperation()
+        # Grab the number of bytes before compression.
+        count = len(data)
         if self.compressed:
             data = self.compressor.compress(data)
         if data:
             self.fileobj.write(self.context.update(data))
-        return len(data)
+        self.bytes_written += count
+        return count
 
     def readable(self):
         return self.mode == PZip.Mode.DECRYPT
@@ -318,13 +338,19 @@ class PZip:
             self.fileobj.write(self.context.finalize())
             assert len(self.context.tag) == 16
             self.fileobj.write(self.context.tag)
+            if self.size is None and self.fileobj.seekable():
+                # If size was not set explicitly, and the file is seekable, update the header with the bytes written.
+                pos = self.fileobj.tell()
+                self.fileobj.seek(self.header_size - 8)
+                self.fileobj.write(struct.pack("!Q", self.bytes_written))
+                self.fileobj.seek(pos)
         self.close_mode.close(self.fileobj)
 
     # These are taken from Django, so this can be used in places where it expects a File object. They are also
     # generally useful to be able to stream a file with a specified chunk size.
 
     def multiple_chunks(self, chunk_size=None):
-        return True
+        return self.size > (chunk_size or self.DEFAULT_CHUNK_SIZE)
 
     def chunks(self, chunk_size=None):
         chunk_size = chunk_size or self.DEFAULT_CHUNK_SIZE
@@ -345,15 +371,20 @@ def die(msg, *args, code=1):
     sys.exit(code)
 
 
-def copy(infile, outfile):
+def copy(infile, outfile, progress=None):
     """
-    Copies infile to outfile in chunks. Closes infile and outfile upon completion, if they are not interactive.
+    Copies infile to outfile in chunks, optionally updating a progress bar. Closes infile and outfile upon completion,
+    if they are not interactive.
     """
     while True:
         chunk = infile.read(PZip.DEFAULT_CHUNK_SIZE)
         if not chunk:
             break
         outfile.write(chunk)
+        if progress:
+            progress.update(len(chunk))
+    if progress:
+        progress.close()
     if not infile.isatty() and not isinstance(infile, io.BytesIO):
         infile.close()
     if not outfile.isatty() and not isinstance(outfile, io.BytesIO):
@@ -365,12 +396,14 @@ def get_files(filename, mode, key, options):
     Given an input filename (possibly None for STDIN), a mode (ENCRYPT or DECRYPT), a key, and the command line
     options, this method will return a tuple:
 
-        (infile, outfile)
+        (infile, outfile, total)
 
-    Where infile and outfile will be open and ready to read/write.
+    Where infile and outfile will be open and ready to read/write, and total is the number of expected bytes to read
+    from infile.
     """
     infile = None
     outfile = None
+    total = None
     if options.stdout:
         outfile = sys.stdout.buffer
     elif options.output:
@@ -385,6 +418,8 @@ def get_files(filename, mode, key, options):
                 if not options.force and os.path.exists(filename + ".pz"):
                     die("%s: output file exists", filename + ".pz")
                 outfile = open(filename + ".pz", "wb")
+            # Progress total will be the size of the input file when encrypting.
+            total = os.path.getsize(filename)
         else:
             infile = sys.stdin.buffer
             # If using STDIN and no output was specified, use STDOUT.
@@ -394,6 +429,8 @@ def get_files(filename, mode, key, options):
         outfile = PZip(outfile, mode, key, iterations=options.iterations, compress=not options.nozip)
     elif mode == PZip.Mode.DECRYPT:
         infile = PZip(filename or sys.stdin.buffer, mode, key, decompress=not options.extract)
+        # PZip's read will return uncompressed data by default, so this should be the uncompressed plaintext size.
+        total = infile.size
         if not outfile:
             if filename:
                 # If an output wasn't specified, and we have a filename, strip off the last suffix (.pz).
@@ -402,13 +439,15 @@ def get_files(filename, mode, key, options):
                     # Special case for when we're just extracting the compressed data, add a .gz suffix.
                     # TODO: get this suffix from the PZip object, in case we add compression options.
                     new_filename += ".gz"
+                    # Set the progress total to the filesize (minus header), since we aren't decompressing.
+                    total = os.path.getsize(filename) - infile.header_size - 16
                 if not options.force and os.path.exists(new_filename):
                     die("%s: output file exists", new_filename)
                 outfile = open(new_filename, "wb")
             else:
                 # Using STDIN and no output was specified, just dump to STDOUT.
                 outfile = sys.stdout.buffer
-    return infile, outfile
+    return infile, outfile, total
 
 
 def main(*args):
@@ -416,7 +455,7 @@ def main(*args):
     parser.add_argument("-z", "--compress", action="store_true", default=False, help="force compression")
     parser.add_argument("-d", "--decompress", action="store_true", default=False, help="force decompression")
     parser.add_argument("-k", "--keep", action="store_true", default=False, help="keep input files")
-    parser.add_argument("-c", "--stdout", action="store_true", default=False, help="write to stdout (implies -k)")
+    parser.add_argument("-c", "--stdout", action="store_true", default=False, help="write to stdout (implies -kq)")
     parser.add_argument("-f", "--force", action="store_true", default=False, help="overwrite existing output files")
     parser.add_argument("-a", "--auto", action="store_true", help="automatically generate and output a key")
     parser.add_argument("-e", "--key", help="encrypt/decrypt using key file")
@@ -427,6 +466,7 @@ def main(*args):
     parser.add_argument("-o", "--output", help="specify outfile file name")
     parser.add_argument("-n", "--nozip", action="store_true", default=False, help="encrypt only, no compression")
     parser.add_argument("-x", "--extract", action="store_true", default=False, help="extract only, no decompression")
+    parser.add_argument("-q", "--quiet", action="store_true", default=False, help="no output")
     parser.add_argument("files", metavar="file", nargs="*", help="files to encrypt or decrypt")
     options = parser.parse_args(args=args or None)
     if options.compress and options.decompress:
@@ -459,6 +499,7 @@ def main(*args):
         if len(files) > 1:
             die("can only output a single file to stdout")
         options.keep = True
+        options.quiet = True
     if options.key:
         with open(options.key, "rb") as f:
             key = f.read()
@@ -483,8 +524,13 @@ def main(*args):
                 die("keys did not match")
         key = key.encode("utf-8")
     for filename in files:
-        infile, outfile = get_files(filename, mode, key, options)
-        copy(infile, outfile)
+        infile, outfile, total = get_files(filename, mode, key, options)
+        progress = (
+            tqdm.tqdm(desc=filename, total=total, unit="B", unit_scale=True, unit_divisor=1024)
+            if filename and total and not options.quiet
+            else None
+        )
+        copy(infile, outfile, progress=progress)
         if filename and not options.keep:
             os.remove(filename)
 

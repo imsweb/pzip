@@ -28,6 +28,7 @@ class PZipTests(unittest.TestCase):
         self.assertLess(len(buf.getvalue()), len(plaintext))
         with TestPZip(buf, PZip.Mode.DECRYPT) as f:
             self.assertEqual(f.read(), plaintext)
+            self.assertEqual(f.size, len(plaintext))
 
     def test_bad_key(self):
         buf = io.BytesIO()
@@ -146,16 +147,16 @@ class CommandLineTests(unittest.TestCase):
             with open(name, "wb") as f:
                 f.write(plaintext)
             # Use 1 iteration for speed.
-            main("-i1", name)
+            main("-q", "-i1", name)
             self.assertFalse(os.path.exists(name))
             self.assertTrue(os.path.exists(name + ".pz"))
-            main(name + ".pz")
+            main("-q", name + ".pz")
             self.assertTrue(os.path.exists(name))
             self.assertFalse(os.path.exists(name + ".pz"))
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)
-            main("-i1", "-o", name + ".enc", name)
-            main("-x", name + ".enc")
+            main("-q", "-i1", "-o", name + ".enc", name)
+            main("-q", "-x", name + ".enc")
             self.assertTrue(os.path.exists(name + ".gz"))
             with gzip.open(name + ".gz") as gz:
                 self.assertTrue(gz.read(), plaintext)
@@ -183,10 +184,10 @@ class CommandLineTests(unittest.TestCase):
             with open(name, "wb") as f:
                 f.write(plaintext)
             with redirect("stderr", "") as stderr:
-                main("-i1", "-a", name)
+                main("-q", "-i1", "-a", name)
                 password = stderr.getvalue().split(": ")[-1].strip()
                 self.assertFalse(password.startswith("-"))
-            main("-i1", "-p", password, name + ".pz")
+            main("-q", "-i1", "-p", password, name + ".pz")
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)
 

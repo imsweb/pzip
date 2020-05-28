@@ -49,6 +49,16 @@ with PZip("myfile.pz", PZip.Mode.DECRYPT, key) as f:
     print(f.read())
 ```
 
+For on-the-fly/streaming encryption, or writing to non-seekable files, you may pass in the length of the plaintext
+that will be written in the PZip header. Alternately, if you don't wish to store the plaintext length in the header
+for privacy reasons, you can pass `size=0`.
+
+```python
+plaintext = b"hello world"
+with PZip(streaming_response, "wb", key, size=len(plaintext)) as f:
+    f.write(plaintext)
+```
+
 ## Encryption
 
 PZip uses AES-GCM with 128-, 192-, or 256-bit (default) keys. Keys are derived using PBKDF2-SHA256 with a configurable
@@ -67,7 +77,7 @@ adding an option in the future to allow conifguration of the comprssion level, o
 
 ## File Format
 
-The PZip file format consists of a 28-byte header, followed by a variable-size nonce in plaintext, immediately followed
+The PZip file format consists of a 36-byte header, followed by a variable-size nonce in plaintext, immediately followed
 by the same nonce encrypted. The remainder of the file is encrypted data, except for the last 16 bytes, which are the
 AES-GCM authentication tag data. The header is big/network endian, with the following fields/sizes:
 
@@ -78,6 +88,7 @@ AES-GCM authentication tag data. The header is big/network endian, with the foll
   * GCM nonce size (in bytes), 1 byte - 12 by default, may be larger
   * PBKDF2 iterations (4 bytes, unsigned int/long)
   * PBKDF2 salt (16 bytes)
+  * Plaintext length (8 bytes, unsigned long long) - optional, may be set to 0
 
 Below is an example of a PZip file containing the plaintext "hello world", encrypted with a key derived from the string
 "pzip", with no compression (for readability). The portion sectioned off in double bars (`===`) is encrypted.
@@ -93,6 +104,7 @@ Below is an example of a PZip file containing the plaintext "hello world", encry
 | 0C                                              | 1    | 12          | Nonce size in bytes    |
 | 00 03 0d 40                                     | 4    | 200000      | PBKDF2 iterations      |
 | AD 46 72 0C 70 00 FF CC 20 97 10 5B 10 D4 0B B8 | 16   | <salt>      | PBKDF2 salt            |
+| 00 00 00 00 00 00 00 0B                         | 8    | 11          | Plaintext length       |
 +-------------------------------------------------+------+-------------+------------------------+
 | B2 4F DD E3 FF 21 A8 09 3E 0C 1C 3E             | 12   | <nonce>     | Nonce (unencrypted)    |
 +=================================================+======+=============+========================+
@@ -108,8 +120,8 @@ You can verify the above example in Python:
 ```python
 >>> import binascii, io, pzip
 >>> data = binascii.unhexlify(
-...     '505A49500100200C00030d40AD46720C7000FFCC2097105B10D40BB8B24FDDE3FF21A8093E0C1C3'
-...     'E8BEB12D481AD6B47B00F74708EA19674A9513147B95CA21258A68BEDF1A908473A10BCB61E2824'
+...     '505A49500100200C00030d40AD46720C7000FFCC2097105B10D40BB8000000000000000BB24FDDE3FF21A80'
+...     '93E0C1C3E8BEB12D481AD6B47B00F74708EA19674A9513147B95CA21258A68BEDF1A908473A10BCB61E2824'
 ... )
 >>> pzip.PZip(io.BytesIO(data), "rb", b"pzip").read()
 b'hello world'
