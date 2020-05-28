@@ -216,13 +216,16 @@ class PZip:
         if key_size is None:
             key_size = self.DEFAULT_KEY_SIZE
         # AES accepts 128-, 192-, and 256-bit keys.
-        assert key_size in (16, 24, 32)
+        if key_size not in (16, 24, 32):
+            raise ValueError("key_size must be 16, 24, or 32.")
         if iterations is None:
             iterations = self.DEFAULT_ITERATIONS
         if self.mode == PZip.Mode.ENCRYPT:
             assert self.fileobj.writable()
             salt = salt or os.urandom(16)
             nonce = nonce or os.urandom(self.DEFAULT_NONCE_SIZE)
+            # Stored to calculate overhead property.
+            self.nonce_size = len(nonce)
             key = self.derive_key(secret_key, salt, iterations, key_size)
             if compress:
                 self.flags |= PZip.Flags.COMPRESSED
@@ -248,6 +251,10 @@ class PZip:
     @property
     def header_size(self):
         return struct.calcsize(self.HEADER_FORMAT)
+
+    @property
+    def overhead(self):
+        return self.header_size + (2 * self.nonce_size) + 16
 
     @property
     def compressed(self):
@@ -285,20 +292,23 @@ class PZip:
         data = self.fileobj.read(self.header_size)
         if len(data) < self.header_size:
             raise InvalidFile("Invalid header.")
-        magic, version, flags, key_size, nonce_size, iterations, salt, self.size = struct.unpack(
+        magic, version, flags, key_size, self.nonce_size, iterations, salt, self.size = struct.unpack(
             self.HEADER_FORMAT, data
         )
-        assert magic == self.MAGIC
-        assert version == self.version
+        if magic != self.MAGIC:
+            raise InvalidFile("File is not a PZip archive.")
+        if version != self.version:
+            raise InvalidFile("Invalid or unknown file version.")
         self.flags = PZip.Flags(flags)
         key = self.derive_key(secret_key, salt, iterations, key_size)
-        nonce = self.fileobj.read(nonce_size)
-        assert len(nonce) == nonce_size
+        nonce = self.fileobj.read(self.nonce_size)
+        if len(nonce) != self.nonce_size:
+            raise InvalidFile("Unable to read nonce.")
         self.context = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend()).decryptor()
         # Once we have a decryption context, read the first nonce_size encrypted bytes and verify they match the nonce.
-        nonce_check = self.context.update(self.fileobj.read(nonce_size))
+        nonce_check = self.context.update(self.fileobj.read(self.nonce_size))
         if nonce != nonce_check:
-            raise InvalidFile()
+            raise InvalidFile("Nonce check failed.")
 
     def seekable(self):
         return False
@@ -440,7 +450,7 @@ def get_files(filename, mode, key, options):
                     # TODO: get this suffix from the PZip object, in case we add compression options.
                     new_filename += ".gz"
                     # Set the progress total to the filesize (minus header), since we aren't decompressing.
-                    total = os.path.getsize(filename) - infile.header_size - 16
+                    total = os.path.getsize(filename) - infile.overhead
                 if not options.force and os.path.exists(new_filename):
                     die("%s: output file exists", new_filename)
                 outfile = open(new_filename, "wb")

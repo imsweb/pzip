@@ -44,7 +44,7 @@ class PZipTests(unittest.TestCase):
         plaintext = b"My voice is my passport. Verify me."
         with TestPZip(buf, PZip.Mode.ENCRYPT, compress=False) as f:
             f.write(plaintext)
-        self.assertEqual(len(buf.getvalue()), len(plaintext) + f.header_size + 12 + 12 + 16)
+        self.assertEqual(len(buf.getvalue()), len(plaintext) + f.overhead)
         with TestPZip(buf, PZip.Mode.DECRYPT) as f:
             self.assertEqual(f.read(), plaintext)
 
