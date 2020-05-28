@@ -57,7 +57,7 @@ class PZipTests(unittest.TestCase):
             # Alter some bytes after the initial nonce check value.
             contents = buf.getbuffer()
             for i in range(50, 100):
-                contents[f.header_size + i] = contents[f.header_size + i] ^ 128
+                contents[PZip.HEADER_SIZE + i] = contents[PZip.HEADER_SIZE + i] ^ 128
             # The file should have a valid header and nonce check, but fail upon reading/authentication.
             with TestPZip(io.BytesIO(contents), PZip.Mode.DECRYPT) as f:
                 with self.assertRaises(InvalidFile):
@@ -150,6 +150,15 @@ class CommandLineTests(unittest.TestCase):
             main("-q", "-i1", name)
             self.assertFalse(os.path.exists(name))
             self.assertTrue(os.path.exists(name + ".pz"))
+            # Check the --list option while we have a .pz file written out.
+            with redirect("stdout", "") as stdout:
+                main("-l", name + ".pz")
+            self.assertEqual(
+                stdout.getvalue().strip(),
+                "{}: PZip version 1; AES-256; 96-bit nonce; compressed; plaintext size {}".format(
+                    name + ".pz", len(plaintext)
+                ),
+            )
             main("-q", name + ".pz")
             self.assertTrue(os.path.exists(name))
             self.assertFalse(os.path.exists(name + ".pz"))

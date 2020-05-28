@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import collections
 import enum
 import getpass
 import io
@@ -17,7 +18,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-__version__ = "0.9.5"
+__version__ = "0.9.6"
 __version_info__ = tuple(int(num) for num in __version__.split("."))
 
 
@@ -140,6 +141,11 @@ class PZip:
     # kdf salt (16 bytes)
     # plaintext size (8 bytes)
     HEADER_FORMAT = "!{}sBBBBL16sQ".format(len(MAGIC))
+    HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+
+    Header = collections.namedtuple(
+        "PZipHeader", ["magic", "version", "flags", "key_size", "nonce_size", "iterations", "salt", "size"]
+    )
 
     # 256-bit AES keys by default.
     DEFAULT_KEY_SIZE = 32
@@ -183,6 +189,28 @@ class PZip:
                 # Rewind (and leave open) the fileobj.
                 fileobj.seek(0)
 
+    @classmethod
+    def info(cls, fileobj):
+        should_close = False
+        if isinstance(fileobj, str):
+            fileobj = open(fileobj, "rb")
+            should_close = True
+        try:
+            data = fileobj.read(cls.HEADER_SIZE)
+            if len(data) < cls.HEADER_SIZE:
+                raise InvalidFile("Invalid PZip header.")
+            header = cls.Header._make(struct.unpack(cls.HEADER_FORMAT, data))
+            if header.magic != cls.MAGIC:
+                raise InvalidFile("File is not a PZip archive.")
+            if header.version != 1:
+                raise InvalidFile("Invalid or unknown file version.")
+            if header.key_size not in (16, 24, 32):
+                raise InvalidFile("Invalid key_size: must be 16, 24, or 32.")
+            return header._replace(flags=cls.Flags(header.flags))
+        finally:
+            if should_close:
+                fileobj.close()
+
     def __init__(
         self,
         fileobj,
@@ -207,7 +235,6 @@ class PZip:
         # For streaming usage, or non-seekable outputs, plaintext size can be passed explicitly.
         # If this is None, it will be updated after each write, and PZip will try to update the header on close.
         self.size = size
-        self.version = 1
         self.flags = PZip.Flags(0)
         self.close_mode = PZip.Close(close)
         if secret_key is None:
@@ -249,12 +276,8 @@ class PZip:
         yield from self.chunks()
 
     @property
-    def header_size(self):
-        return struct.calcsize(self.HEADER_FORMAT)
-
-    @property
     def overhead(self):
-        return self.header_size + (2 * self.nonce_size) + 16
+        return PZip.HEADER_SIZE + (2 * self.nonce_size) + 16
 
     @property
     def compressed(self):
@@ -271,15 +294,7 @@ class PZip:
     def write_header(self, key_size, salt, iterations, nonce):
         self.fileobj.write(
             struct.pack(
-                self.HEADER_FORMAT,
-                self.MAGIC,
-                self.version,
-                self.flags,
-                key_size,
-                len(nonce),
-                iterations,
-                salt,
-                self.size or 0,
+                self.HEADER_FORMAT, self.MAGIC, 1, self.flags, key_size, len(nonce), iterations, salt, self.size or 0,
             )
         )
         # Between the header and the encrypted file data is the nonce (twice) - once unencrypted, once encrypted.
@@ -289,18 +304,11 @@ class PZip:
         self.fileobj.write(self.context.update(nonce))
 
     def read_header(self, secret_key):
-        data = self.fileobj.read(self.header_size)
-        if len(data) < self.header_size:
-            raise InvalidFile("Invalid header.")
-        magic, version, flags, key_size, self.nonce_size, iterations, salt, self.size = struct.unpack(
-            self.HEADER_FORMAT, data
-        )
-        if magic != self.MAGIC:
-            raise InvalidFile("File is not a PZip archive.")
-        if version != self.version:
-            raise InvalidFile("Invalid or unknown file version.")
-        self.flags = PZip.Flags(flags)
-        key = self.derive_key(secret_key, salt, iterations, key_size)
+        header = PZip.info(self.fileobj)
+        self.flags = header.flags
+        self.nonce_size = header.nonce_size
+        self.size = header.size
+        key = self.derive_key(secret_key, header.salt, header.iterations, header.key_size)
         nonce = self.fileobj.read(self.nonce_size)
         if len(nonce) != self.nonce_size:
             raise InvalidFile("Unable to read nonce.")
@@ -351,7 +359,7 @@ class PZip:
             if self.size is None and self.fileobj.seekable():
                 # If size was not set explicitly, and the file is seekable, update the header with the bytes written.
                 pos = self.fileobj.tell()
-                self.fileobj.seek(self.header_size - 8)
+                self.fileobj.seek(PZip.HEADER_SIZE - 8)
                 self.fileobj.write(struct.pack("!Q", self.bytes_written))
                 self.fileobj.seek(pos)
         self.close_mode.close(self.fileobj)
@@ -460,6 +468,28 @@ def get_files(filename, mode, key, options):
     return infile, outfile, total
 
 
+def print_info(filename, show_errors=False):
+    try:
+        header = PZip.info(sys.stdin.buffer if filename == "-" else filename)
+        key_bits = header.key_size * 8
+        nonce_bits = header.nonce_size * 8
+        info = "{}: PZip version {}; AES-{}; {}-bit nonce".format(filename, header.version, key_bits, nonce_bits)
+        if header.flags & PZip.Flags.COMPRESSED:
+            info += "; compressed"
+        if header.size:
+            info += "; plaintext size {}".format(header.size)
+        print(info)
+    except FileNotFoundError:
+        if show_errors:
+            log("{}: file not found", filename)
+    except IsADirectoryError:
+        if show_errors:
+            log("{}: is a directory", filename)
+    except InvalidFile as e:
+        if show_errors:
+            log("{}: {}", filename, str(e))
+
+
 def main(*args):
     parser = argparse.ArgumentParser()
     parser.add_argument("-z", "--compress", action="store_true", default=False, help="force compression")
@@ -477,8 +507,17 @@ def main(*args):
     parser.add_argument("-n", "--nozip", action="store_true", default=False, help="encrypt only, no compression")
     parser.add_argument("-x", "--extract", action="store_true", default=False, help="extract only, no decompression")
     parser.add_argument("-q", "--quiet", action="store_true", default=False, help="no output")
+    parser.add_argument(
+        "-l", "--list", action="store_true", default=False, help="print information about the specified files"
+    )
     parser.add_argument("files", metavar="file", nargs="*", help="files to encrypt or decrypt")
     options = parser.parse_args(args=args or None)
+    if options.list:
+        if not options.files:
+            die("no files specified")
+        for filename in options.files:
+            print_info(filename, show_errors=not options.quiet)
+        return
     if options.compress and options.decompress:
         die("cannot specify -z and -d together")
     files = []
