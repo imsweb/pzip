@@ -185,6 +185,7 @@ class CommandLineTests(unittest.TestCase):
             with redirect("stderr", "") as stderr:
                 main("-i1", "-a", name)
                 password = stderr.getvalue().split(": ")[-1].strip()
+                self.assertFalse(password.startswith("-"))
             main("-i1", "-p", password, name + ".pz")
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)

@@ -470,6 +470,9 @@ def main(*args):
             log("-a ignored, using password")
     elif options.auto:
         token = secrets.token_urlsafe(32)
+        # Not strictly a problem, but make it easy to use as an argument to -p.
+        while token.startswith("-"):
+            token = secrets.token_urlsafe(32)
         log("encrypting with password: {}", token)
         key = token.encode("utf-8")
     else:
