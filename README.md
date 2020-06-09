@@ -29,9 +29,9 @@ PZip will generate an encryption key automatically, if you want:
 
 ```
 pzip -a sensitive_data.csv
-encrypting with password: 7xRLoyHgK6J2-4mUkT3JoklSyfSYxHb1EkMABjasnUc
+encrypting with password: HgHs4OIm4zGXkch6lTBIqg
 
-pzip -p 7xRLoyHgK6J2-4mUkT3JoklSyfSYxHb1EkMABjasnUc sensitive_data.csv.pz
+pzip -p HgHs4OIm4zGXkch6lTBIqg sensitive_data.csv.pz
 ```
 
 ## Python Usage
@@ -47,6 +47,13 @@ with PZip("myfile.pz", PZip.Mode.ENCRYPT, key) as f:
 
 with PZip("myfile.pz", PZip.Mode.DECRYPT, key) as f:
     print(f.read())
+```
+
+To encrypt using a password instead of a random key (and thus use PBKDF2 instead of HKDF):
+
+```python
+with PZip("myfile.pz", PZip.Mode.ENCRYPT, password=b"secret") as f:
+    f.write(b"hello world")
 ```
 
 For on-the-fly/streaming encryption, or writing to non-seekable files, you may pass in the length of the plaintext
