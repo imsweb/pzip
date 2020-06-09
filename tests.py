@@ -34,10 +34,11 @@ class PZipTests(unittest.TestCase):
         buf = io.BytesIO()
         plaintext = b"message"
         for compress in (True, False):
-            with TestPZip(buf, PZip.Mode.ENCRYPT, b"goodkey", compress=compress) as f:
+            with TestPZip(buf, PZip.Mode.ENCRYPT, password=b"goodkey", compress=compress) as f:
                 f.write(plaintext)
+            self.assertTrue(f.password)
             with self.assertRaises(InvalidFile):
-                TestPZip(buf, PZip.Mode.DECRYPT, b"badkey")
+                TestPZip(buf, PZip.Mode.DECRYPT, password=b"badkey")
 
     def test_no_compression(self):
         buf = io.BytesIO()

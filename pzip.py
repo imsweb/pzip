@@ -16,9 +16,10 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-__version__ = "0.9.6"
+__version__ = "0.9.7"
 __version_info__ = tuple(int(num) for num in __version__.split("."))
 
 
@@ -164,7 +165,8 @@ class PZip:
         DECRYPT = "rb"
 
     class Flags(enum.IntFlag):
-        COMPRESSED = 1
+        COMPRESSED = 1 << 0
+        PASSWORD = 1 << 1
 
     class Close(enum.Enum):
         REWIND = -1
@@ -216,6 +218,7 @@ class PZip:
         fileobj,
         mode,
         secret_key=None,
+        password=None,
         name=None,
         size=None,
         key_size=None,
@@ -227,6 +230,8 @@ class PZip:
         close=Close.AUTOMATIC,
     ):
         self.mode = PZip.Mode(mode)
+        if secret_key and password:
+            raise ValueError("Specify a secret_key or a password, not both.")
         if isinstance(fileobj, str):
             self.fileobj = open(fileobj, self.mode.value)
         else:
@@ -237,9 +242,16 @@ class PZip:
         self.size = size
         self.flags = PZip.Flags(0)
         self.close_mode = PZip.Close(close)
-        if secret_key is None:
+        if secret_key:
+            # If a secret_key (presumably random bits) was specified, use HKDF for speed.
+            key_material = secret_key
+        elif password:
+            # If a password was specified, use PBKDF2 to slow down attacks.
+            key_material = password
+            self.flags |= PZip.Flags.PASSWORD
+        else:
             # Allow a default_key implementation for using things like Django's SECRET_KEY setting.
-            secret_key = self.default_key()
+            key_material = self.default_key()
         if key_size is None:
             key_size = self.DEFAULT_KEY_SIZE
         # AES accepts 128-, 192-, and 256-bit keys.
@@ -253,7 +265,7 @@ class PZip:
             nonce = nonce or os.urandom(self.DEFAULT_NONCE_SIZE)
             # Stored to calculate overhead property.
             self.nonce_size = len(nonce)
-            key = self.derive_key(secret_key, salt, iterations, key_size)
+            key = self.derive_key(key_material, salt, iterations, key_size)
             if compress:
                 self.flags |= PZip.Flags.COMPRESSED
                 self.compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, zlib.MAX_WBITS | 16)
@@ -262,7 +274,7 @@ class PZip:
             self.bytes_written = 0
         elif self.mode == PZip.Mode.DECRYPT:
             assert self.fileobj.readable()
-            self.read_header(secret_key)
+            self.read_header(key_material)
             decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16) if self.compressed and decompress else None
             self.reader = PZipReader(self.fileobj, self.context, decompressor=decompressor)
 
@@ -283,18 +295,34 @@ class PZip:
     def compressed(self):
         return self.flags & PZip.Flags.COMPRESSED
 
+    @property
+    def password(self):
+        return self.flags & PZip.Flags.PASSWORD
+
     def default_key(self):
         raise NotImplementedError("{} does not provide a default secret key.".format(self.__class__.__name__))
 
-    def derive_key(self, secret_key, salt, iterations, key_size):
-        return PBKDF2HMAC(
-            algorithm=hashes.SHA256(), length=key_size, salt=salt, iterations=iterations, backend=default_backend()
-        ).derive(secret_key)
+    def derive_key(self, key_material, salt, iterations, key_size):
+        algorithm = hashes.SHA256()
+        backend = default_backend()
+        if self.password:
+            kdf = PBKDF2HMAC(algorithm=algorithm, length=key_size, salt=salt, iterations=iterations, backend=backend)
+        else:
+            kdf = HKDF(algorithm=algorithm, length=key_size, salt=salt, info=None, backend=backend)
+        return kdf.derive(key_material)
 
     def write_header(self, key_size, salt, iterations, nonce):
         self.fileobj.write(
             struct.pack(
-                self.HEADER_FORMAT, self.MAGIC, 1, self.flags, key_size, len(nonce), iterations, salt, self.size or 0,
+                self.HEADER_FORMAT,
+                self.MAGIC,
+                1,
+                self.flags,
+                key_size,
+                len(nonce),
+                iterations if self.password else 0,
+                salt,
+                self.size or 0,
             )
         )
         # Between the header and the encrypted file data is the nonce (twice) - once unencrypted, once encrypted.
@@ -303,12 +331,12 @@ class PZip:
         self.fileobj.write(nonce)
         self.fileobj.write(self.context.update(nonce))
 
-    def read_header(self, secret_key):
+    def read_header(self, key_material):
         header = PZip.info(self.fileobj)
         self.flags = header.flags
         self.nonce_size = header.nonce_size
         self.size = header.size
-        key = self.derive_key(secret_key, header.salt, header.iterations, header.key_size)
+        key = self.derive_key(key_material, header.salt, header.iterations, header.key_size)
         nonce = self.fileobj.read(self.nonce_size)
         if len(nonce) != self.nonce_size:
             raise InvalidFile("Unable to read nonce.")
@@ -409,7 +437,7 @@ def copy(infile, outfile, progress=None):
         outfile.close()
 
 
-def get_files(filename, mode, key, options):
+def get_files(filename, mode, key, is_password, options):
     """
     Given an input filename (possibly None for STDIN), a mode (ENCRYPT or DECRYPT), a key, and the command line
     options, this method will return a tuple:
@@ -422,6 +450,7 @@ def get_files(filename, mode, key, options):
     infile = None
     outfile = None
     total = None
+    key_args = {"password": key} if is_password else {"secret_key": key}
     if options.stdout:
         outfile = sys.stdout.buffer
     elif options.output:
@@ -444,9 +473,9 @@ def get_files(filename, mode, key, options):
             if not outfile:
                 outfile = sys.stdout.buffer
         # Wrap the output file in a PZip object.
-        outfile = PZip(outfile, mode, key, iterations=options.iterations, compress=not options.nozip)
+        outfile = PZip(outfile, mode, **key_args, iterations=options.iterations, compress=not options.nozip)
     elif mode == PZip.Mode.DECRYPT:
-        infile = PZip(filename or sys.stdin.buffer, mode, key, decompress=not options.extract)
+        infile = PZip(filename or sys.stdin.buffer, mode, **key_args, decompress=not options.extract)
         # PZip's read will return uncompressed data by default, so this should be the uncompressed plaintext size.
         total = infile.size
         if not outfile:
@@ -552,28 +581,32 @@ def main(*args):
     if options.key:
         with open(options.key, "rb") as f:
             key = f.read()
+            is_password = False
         if options.password:
             log("-p ignored, using key file {}", options.key)
     elif options.password:
         key = options.password.encode("utf-8")
+        is_password = True
         if options.auto:
             log("-a ignored, using password")
     elif options.auto:
-        token = secrets.token_urlsafe(32)
+        token = secrets.token_urlsafe(16)
         # Not strictly a problem, but make it easy to use as an argument to -p.
         while token.startswith("-"):
-            token = secrets.token_urlsafe(32)
+            token = secrets.token_urlsafe(16)
         log("encrypting with password: {}", token)
         key = token.encode("utf-8")
+        is_password = True
     else:
-        key = getpass.getpass("Key: ")
+        key = getpass.getpass("Password: ")
         if mode == PZip.Mode.ENCRYPT:
             verify = getpass.getpass("Verify: ")
             if verify != key:
-                die("keys did not match")
+                die("passwords did not match")
         key = key.encode("utf-8")
+        is_password = True
     for filename in files:
-        infile, outfile, total = get_files(filename, mode, key, options)
+        infile, outfile, total = get_files(filename, mode, key, is_password, options)
         progress = (
             tqdm.tqdm(desc=filename, total=total, unit="B", unit_scale=True, unit_divisor=1024)
             if filename and total and not options.quiet
