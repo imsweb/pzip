@@ -268,7 +268,9 @@ class PZip:
             key = self.derive_key(key_material, salt, iterations, key_size)
             if compress:
                 self.flags |= PZip.Flags.COMPRESSED
-                self.compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, zlib.MAX_WBITS | 16)
+                # compress=True will use Z_DEFAULT_COMPRESSION, otherwise use whatever level was specified.
+                level = zlib.Z_DEFAULT_COMPRESSION if compress is True else compress
+                self.compressor = zlib.compressobj(level, zlib.DEFLATED, zlib.MAX_WBITS | 16)
             self.context = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend()).encryptor()
             self.write_header(key_size, salt, iterations, nonce)
             self.bytes_written = 0
