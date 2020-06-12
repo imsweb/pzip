@@ -4,6 +4,7 @@ import argparse
 import collections
 import enum
 import getpass
+import gzip
 import io
 import os
 import secrets
@@ -15,11 +16,11 @@ import tqdm
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-__version__ = "0.9.7"
+__version__ = "0.9.8"
 __version_info__ = tuple(int(num) for num in __version__.split("."))
 
 
@@ -27,106 +28,19 @@ class InvalidFile(Exception):
     pass
 
 
-class LagReader:
+def xor_bytes(a, b):
+    assert len(a) == len(b)
+    return bytes([_a ^ _b for _a, _b in zip(a, b)])
+
+
+def _compress(data, compresslevel=9, mtime=0):
     """
-    Reader that reads all but the last `lag` bytes of `fileobj`, which are stored in `tail`.
+    Basically a copy of gzip.compress, but with mtime=0 for Python <3.8, where it was added as a param.
     """
-
-    def __init__(self, fileobj, lag):
-        self.fileobj = fileobj
-        self.lag = lag
-        self.tail = b""
-
-    def read(self, size=None):
-        # Start with the previous tail data
-        data = self.tail
-        if size is None or size < 0:
-            # Read until we can read no more.
-            while True:
-                chunk = self.fileobj.read()
-                if not chunk:
-                    break
-                data += chunk
-        else:
-            # Read the requested size plus `lag` bytes, so we can return the number of requested bytes in most cases.
-            chunk = self.fileobj.read(size + self.lag)
-            if not chunk:
-                return chunk
-            data += chunk
-        # Stored as a separate variable so black doesn't mangle the slices below.
-        num = -self.lag
-        # The tail is always the last `lag` bytes read.
-        self.tail = data[num:]
-        # Return all but the tail.
-        return data[:num]
-
-
-class PZipReader:
-    """
-    Buffered reader for PZip data. Handles decryption using the provided `context`, and optionally decompression using
-    the provided `decompressor`.
-    """
-
-    def __init__(self, fileobj, context, decompressor=None, tag_size=16):
-        self.reader = LagReader(fileobj, tag_size)
-        self.context = context
-        self.decompressor = decompressor
-        self.buf = b""
-        self.eof = False
-
-    def _process(self, data):
-        data = self.context.update(data)
-        if self.decompressor:
-            try:
-                data = self.decompressor.decompress(data)
-                # XXX: deal with this, ideally with a test
-                assert not self.decompressor.unconsumed_tail
-            except zlib.error as e:
-                raise InvalidFile() from e
-        return data
-
-    def _fill(self, size):
-        if self.eof:
-            return
-        if size is None or size < 0:
-            # Read and process the whole file into the buffer.
-            self.buf += self._process(self.reader.read())
-            self.eof = True
-        else:
-            # Fill the buffer only as much as needed to fulfill the request.
-            while size > len(self.buf):
-                chunk = self.reader.read(size)
-                if not chunk:
-                    # EOF, no sense in trying to keep reading.
-                    self.eof = True
-                    break
-                self.buf += self._process(chunk)
-        if self.eof:
-            try:
-                # Finalize the decryption context with the tag data (16-byte tail).
-                remaining = self.context.finalize_with_tag(self.reader.tail)
-                if self.decompressor and not self.decompressor.eof:
-                    # This probably shouldn't happen? If it can, I need a test.
-                    remaining = self.decompressor.decompress(remaining)
-                    if hasattr(self.decompressor, "flush"):
-                        remaining += self.decompressor.flush()
-                self.buf += remaining
-            except (InvalidTag, zlib.error) as e:
-                raise InvalidFile() from e
-
-    def _trim(self, size):
-        if size is None or size < 0:
-            size = len(self.buf)
-        try:
-            # Returns the number of requested bytes (or as much as we can).
-            return self.buf[:size]
-        finally:
-            # Trim the buffer.
-            self.buf = self.buf[size:]
-
-    def read(self, size=None):
-        self._fill(size)
-        return self._trim(size)
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=compresslevel, mtime=mtime) as f:
+        f.write(data)
+    return buf.getvalue()
 
 
 class PZip:
@@ -138,14 +52,14 @@ class PZip:
     # flags (1 byte)
     # key size, in bytes (1 byte)
     # nonce size, in bytes (1 bytes)
-    # kdf iterations (4 bytes)
     # kdf salt (16 bytes)
+    # kdf iterations (4 bytes)
     # plaintext size (8 bytes)
-    HEADER_FORMAT = "!{}sBBBBL16sQ".format(len(MAGIC))
+    HEADER_FORMAT = "!{}sBBBB16sLQ".format(len(MAGIC))
     HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
     Header = collections.namedtuple(
-        "PZipHeader", ["magic", "version", "flags", "key_size", "nonce_size", "iterations", "salt", "size"]
+        "PZipHeader", ["magic", "version", "flags", "key_size", "nonce_size", "salt", "iterations", "size"]
     )
 
     # 256-bit AES keys by default.
@@ -259,26 +173,22 @@ class PZip:
             raise ValueError("key_size must be 16, 24, or 32.")
         if iterations is None:
             iterations = self.DEFAULT_ITERATIONS
+        self.counter = 0
+        self.buffer = b""
         if self.mode == PZip.Mode.ENCRYPT:
             assert self.fileobj.writable()
             salt = salt or os.urandom(16)
-            nonce = nonce or os.urandom(self.DEFAULT_NONCE_SIZE)
-            # Stored to calculate overhead property.
-            self.nonce_size = len(nonce)
-            key = self.derive_key(key_material, salt, iterations, key_size)
+            self.nonce = nonce or os.urandom(self.DEFAULT_NONCE_SIZE)
+            self.key = self.derive_key(key_material, salt, iterations, key_size)
             if compress:
                 self.flags |= PZip.Flags.COMPRESSED
-                # compress=True will use Z_DEFAULT_COMPRESSION, otherwise use whatever level was specified.
-                level = zlib.Z_DEFAULT_COMPRESSION if compress is True else compress
-                self.compressor = zlib.compressobj(level, zlib.DEFLATED, zlib.MAX_WBITS | 16)
-            self.context = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend()).encryptor()
-            self.write_header(key_size, salt, iterations, nonce)
+                self.compresslevel = zlib.Z_DEFAULT_COMPRESSION if compress is True else int(compress)
+            self.write_header(key_size, salt, iterations)
             self.bytes_written = 0
         elif self.mode == PZip.Mode.DECRYPT:
             assert self.fileobj.readable()
+            self.decompress = decompress
             self.read_header(key_material)
-            decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16) if self.compressed and decompress else None
-            self.reader = PZipReader(self.fileobj, self.context, decompressor=decompressor)
 
     def __enter__(self):
         return self
@@ -288,10 +198,6 @@ class PZip:
 
     def __iter__(self):
         yield from self.chunks()
-
-    @property
-    def overhead(self):
-        return PZip.HEADER_SIZE + (2 * self.nonce_size) + 16
 
     @property
     def compressed(self):
@@ -313,7 +219,10 @@ class PZip:
             kdf = HKDF(algorithm=algorithm, length=key_size, salt=salt, info=None, backend=backend)
         return kdf.derive(key_material)
 
-    def write_header(self, key_size, salt, iterations, nonce):
+    def write_header(self, key_size, salt, iterations):
+        """
+        Writes the PZip header and nonce.
+        """
         self.fileobj.write(
             struct.pack(
                 self.HEADER_FORMAT,
@@ -321,32 +230,58 @@ class PZip:
                 1,
                 self.flags,
                 key_size,
-                len(nonce),
-                iterations if self.password else 0,
+                len(self.nonce),
                 salt,
+                iterations if self.password else 0,
                 self.size or 0,
             )
         )
-        # Between the header and the encrypted file data is the nonce (twice) - once unencrypted, once encrypted.
-        # This is not part of the "header" in that the nonce size can vary. It's repeated as the first encrypted bytes
-        # so decryption with bad keys can fail fast.
-        self.fileobj.write(nonce)
-        self.fileobj.write(self.context.update(nonce))
+        self.fileobj.write(self.nonce)
 
     def read_header(self, key_material):
+        """
+        Reads the PZip header and nonce, and generates the key based on header data and key_material.
+        """
         header = PZip.info(self.fileobj)
         self.flags = header.flags
-        self.nonce_size = header.nonce_size
         self.size = header.size
-        key = self.derive_key(key_material, header.salt, header.iterations, header.key_size)
-        nonce = self.fileobj.read(self.nonce_size)
-        if len(nonce) != self.nonce_size:
+        self.key = self.derive_key(key_material, header.salt, header.iterations, header.key_size)
+        self.nonce = self.fileobj.read(header.nonce_size)
+        if len(self.nonce) != header.nonce_size:
             raise InvalidFile("Unable to read nonce.")
-        self.context = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend()).decryptor()
-        # Once we have a decryption context, read the first nonce_size encrypted bytes and verify they match the nonce.
-        nonce_check = self.context.update(self.fileobj.read(self.nonce_size))
-        if nonce != nonce_check:
-            raise InvalidFile("Nonce check failed.")
+
+    def _ciphertext_size(self):
+        """
+        Calculates the total ciphertext size, minus block headers and authentication tags.
+        """
+        assert self.mode == PZip.Mode.DECRYPT
+        assert self.fileobj.seekable()
+        # Remember where we were, so we can reset the file position when we're done.
+        old_pos = self.fileobj.tell()
+        # Start reading after the header/nonce, at the first block header.
+        self.fileobj.seek(PZip.HEADER_SIZE + len(self.nonce))
+        total = 0
+        while True:
+            data = self.fileobj.read(4)
+            if not data:
+                # No more blocks, reset the file position and return the total size thus far.
+                self.fileobj.seek(old_pos)
+                return total
+            block_size = struct.unpack("!L", data)[0]
+            # Subtract out the GCM authentication tag length from each block.
+            total += block_size - 16
+            # Seek forward block_size bytes.
+            self.fileobj.seek(block_size, 1)
+
+    def next_nonce(self):
+        """
+        Computes the next block nonce, based on the original nonce and current counter, then increments the counter.
+        The nonce for block number B with original nonce N is essentially N^B, where B is a 32-bit unsigned big-endian
+        integer, left-padded to the length of N with zero bytes.
+        """
+        counter_bytes = (b"\x00" * (len(self.nonce) - 4)) + struct.pack("!L", self.counter)
+        self.counter += 1
+        return xor_bytes(self.nonce, counter_bytes)
 
     def seekable(self):
         return False
@@ -354,38 +289,76 @@ class PZip:
     def writable(self):
         return self.mode == PZip.Mode.ENCRYPT
 
+    def write_block(self, plaintext):
+        """
+        Writes a block of plaintext including the block header (size), after compressing and encrypting it.
+        """
+        self.bytes_written += len(plaintext)
+        if self.compressed:
+            plaintext = _compress(plaintext, self.compresslevel)
+        ciphertext = AESGCM(self.key).encrypt(self.next_nonce(), plaintext, None)
+        self.fileobj.write(struct.pack("!L", len(ciphertext)))
+        self.fileobj.write(ciphertext)
+
     def write(self, data):
+        """
+        Buffers an arbitrary amount of data to be written using write_block. Blocks will not be written until the
+        buffer is at least DEFAULT_CHUNK_SIZE bytes, or the file is closed.
+        """
         if self.mode != PZip.Mode.ENCRYPT:
             raise io.UnsupportedOperation()
-        # Grab the number of bytes before compression.
-        count = len(data)
-        if self.compressed:
-            data = self.compressor.compress(data)
-        if data:
-            self.fileobj.write(self.context.update(data))
-        self.bytes_written += count
-        return count
+        self.buffer += data
+        if len(self.buffer) > self.DEFAULT_CHUNK_SIZE:
+            self.write_block(self.buffer)
+            self.buffer = b""
+        return len(data)
 
     def readable(self):
         return self.mode == PZip.Mode.DECRYPT
 
+    def read_block(self):
+        """
+        Reads a full block of ciphertext, including the block header (size), and decrypts/decompresses it to return
+        a block of plaintext. Raises InvalidFile if the block could not be authenticated.
+        """
+        block_header = self.fileobj.read(4)
+        if not block_header:
+            return b""
+        block_size = struct.unpack("!L", block_header)[0]
+        ciphertext = self.fileobj.read(block_size)
+        try:
+            plaintext = AESGCM(self.key).decrypt(self.next_nonce(), ciphertext, None)
+        except InvalidTag as e:
+            raise InvalidFile() from e
+        if self.compressed and self.decompress:
+            plaintext = gzip.decompress(plaintext)
+        return plaintext
+
     def read(self, size=-1):
+        """
+        Reads an arbitrary amount of data, buffering any unread part of the last read block.
+        """
         if self.mode != PZip.Mode.DECRYPT:
             raise io.UnsupportedOperation()
-        return self.reader.read(size)
+        read_all = size is None or size < 0
+        while read_all or (len(self.buffer) < size):
+            block = self.read_block()
+            if not block:
+                break
+            self.buffer += block
+        try:
+            return self.buffer if read_all else self.buffer[:size]
+        finally:
+            self.buffer = b"" if read_all else self.buffer[size:]
 
     def isatty(self):
         return False
 
     def close(self):
         if self.mode == PZip.Mode.ENCRYPT:
-            if self.compressed:
-                remaining = self.compressor.flush()
-                if remaining:
-                    self.fileobj.write(self.context.update(remaining))
-            self.fileobj.write(self.context.finalize())
-            assert len(self.context.tag) == 16
-            self.fileobj.write(self.context.tag)
+            if self.buffer:
+                self.write_block(self.buffer)
+                self.buffer = b""
             if self.size is None and self.fileobj.seekable():
                 # If size was not set explicitly, and the file is seekable, update the header with the bytes written.
                 pos = self.fileobj.tell()
@@ -398,13 +371,18 @@ class PZip:
     # generally useful to be able to stream a file with a specified chunk size.
 
     def multiple_chunks(self, chunk_size=None):
-        return self.size > (chunk_size or self.DEFAULT_CHUNK_SIZE)
+        # return self.size > (chunk_size or self.DEFAULT_CHUNK_SIZE)
+        return True
 
     def chunks(self, chunk_size=None):
-        chunk_size = chunk_size or self.DEFAULT_CHUNK_SIZE
-        # TODO: need a reset method to re-create context and reset file position
+        assert self.mode == PZip.Mode.DECRYPT
+        if self.fileobj.seekable():
+            # Django's File object resets to the beginning if possible, so we will too.
+            self.fileobj.seek(PZip.HEADER_SIZE + len(self.nonce))
+            self.counter = 0
+            self.buffer = b""
         while True:
-            data = self.read(chunk_size)
+            data = self.read(chunk_size) if chunk_size else self.read_block()
             if not data:
                 break
             yield data
@@ -488,8 +466,8 @@ def get_files(filename, mode, key, is_password, options):
                     # Special case for when we're just extracting the compressed data, add a .gz suffix.
                     # TODO: get this suffix from the PZip object, in case we add compression options.
                     new_filename += ".gz"
-                    # Set the progress total to the filesize (minus header), since we aren't decompressing.
-                    total = os.path.getsize(filename) - infile.overhead
+                    # Set the progress total to the (compressed) ciphertext size, since we aren't decompressing.
+                    total = infile._ciphertext_size()
                 if not options.force and os.path.exists(new_filename):
                     die("%s: output file exists", new_filename)
                 outfile = open(new_filename, "wb")

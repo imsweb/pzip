@@ -38,15 +38,15 @@ class PZipTests(unittest.TestCase):
                 f.write(plaintext)
             self.assertTrue(f.password)
             with self.assertRaises(InvalidFile):
-                TestPZip(buf, PZip.Mode.DECRYPT, password=b"badkey")
+                TestPZip(buf, PZip.Mode.DECRYPT, password=b"badkey").read_block()
 
     def test_no_compression(self):
         buf = io.BytesIO()
         plaintext = b"My voice is my passport. Verify me."
         with TestPZip(buf, PZip.Mode.ENCRYPT, compress=False) as f:
             f.write(plaintext)
-        self.assertEqual(len(buf.getvalue()), len(plaintext) + f.overhead)
         with TestPZip(buf, PZip.Mode.DECRYPT) as f:
+            self.assertEqual(f._ciphertext_size(), len(plaintext))
             self.assertEqual(f.read(), plaintext)
 
     def test_integrity(self):
