@@ -116,6 +116,7 @@ class PZip:
         block_size=None,
         compress=True,
         decompress=True,
+        peek=False,
         close=Close.AUTOMATIC,
     ):
         self.version = 1
@@ -132,6 +133,7 @@ class PZip:
         self.size = size
         self.flags = PZip.Flags(0)
         self.close_mode = PZip.Close(close)
+        self.closed = False
         if secret_key:
             # If a secret_key (presumably random bits) was specified, use HKDF for speed.
             key_material = secret_key
@@ -171,6 +173,8 @@ class PZip:
             assert self.fileobj.readable()
             self.decompress = decompress
             self.read_header(key_material)
+            if peek:
+                self.buffer = self.read_block()
 
     def __enter__(self):
         return self
@@ -180,6 +184,13 @@ class PZip:
 
     def __iter__(self):
         yield from self.chunks()
+
+    def __del__(self):
+        try:
+            self.close()
+        except:  # noqa
+            # Not much we can do at this point.
+            pass
 
     @property
     def compressed(self):
@@ -257,10 +268,10 @@ class PZip:
 
     def _ciphertext_size(self):
         """
-        Calculates the total ciphertext size, minus block headers and authentication tags.
+        Calculates the total ciphertext size, minus block headers and authentication tags. Will raise an exception if
+        the underlying file object is not seekable.
         """
-        assert self.mode == PZip.Mode.DECRYPT
-        assert self.fileobj.seekable()
+        assert self.readable()
         # Remember where we were, so we can reset the file position when we're done.
         old_pos = self.fileobj.tell()
         # Start reading after the header/nonce, at the first block header.
@@ -298,8 +309,7 @@ class PZip:
         """
         Writes a block of plaintext including the block header (size), after compressing and encrypting it.
         """
-        if self.mode != PZip.Mode.ENCRYPT:
-            raise io.UnsupportedOperation()
+        assert self.writable()
         self.bytes_written += len(plaintext)
         if self.compressed:
             plaintext = _compress(plaintext, self.compresslevel)
@@ -333,6 +343,7 @@ class PZip:
         Reads a full block of ciphertext, including the block header (size), and decrypts/decompresses it to return
         a block of plaintext. Raises InvalidFile if the block could not be authenticated.
         """
+        assert self.readable()
         block_header = self.fileobj.read(4)
         if not block_header:
             return b""
@@ -370,6 +381,8 @@ class PZip:
         return False
 
     def close(self):
+        if self.closed:
+            return
         if self.mode == PZip.Mode.ENCRYPT:
             self.flush()
             if self.size is None and self.fileobj.seekable():
@@ -379,6 +392,17 @@ class PZip:
                 self.fileobj.write(struct.pack("!Q", self.bytes_written))
                 self.fileobj.seek(pos)
         self.close_mode.close(self.fileobj)
+        self.closed = True
+
+    def rewind(self):
+        """
+        Rewinds to the first block, clears the read buffer, and resets the counter. Will raise an exception if the
+        underlying file object is not seekable.
+        """
+        assert self.mode == PZip.Mode.DECRYPT
+        self.fileobj.seek(PZip.HEADER_SIZE + len(self.nonce))
+        self.counter = 0
+        self.buffer = b""
 
     # These are taken from Django, so this can be used in places where it expects a File object. They are also
     # generally useful to be able to stream a file with a specified chunk size.
@@ -387,12 +411,12 @@ class PZip:
         return True
 
     def chunks(self, chunk_size=None):
-        assert self.mode == PZip.Mode.DECRYPT
-        if self.fileobj.seekable():
+        assert self.readable()
+        try:
             # Django's File object resets to the beginning if possible, so we will too.
-            self.fileobj.seek(PZip.HEADER_SIZE + len(self.nonce))
-            self.counter = 0
-            self.buffer = b""
+            self.rewind()
+        except Exception:
+            pass
         while True:
             # If chunk_size is not specified, it's more efficient to just yield blocks.
             data = self.read(chunk_size) if chunk_size else self.read_block()

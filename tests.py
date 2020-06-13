@@ -128,6 +128,20 @@ class PZipTests(unittest.TestCase):
             self.assertEqual(len(chunks), num)
             self.assertEqual(b"".join(chunks), plaintext * num)
 
+    def test_peek_rewind(self):
+        buf = io.BytesIO()
+        plaintext = b"Hello, world!\n" * 1000
+        with TestPZip(buf, PZip.Mode.ENCRYPT) as f:
+            f.write(plaintext)
+        with self.assertRaises(InvalidFile):
+            # Peeking with a bad key should raise InvalidFile immediately.
+            TestPZip(buf, PZip.Mode.DECRYPT, b"badkey", peek=True)
+        buf.seek(0)
+        with TestPZip(buf, PZip.Mode.DECRYPT, peek=True) as f:
+            self.assertEqual(f.read(), plaintext)
+            f.rewind()
+            self.assertEqual(f.read(), plaintext)
+
 
 class redirect:
     def __init__(self, name, data=b""):
