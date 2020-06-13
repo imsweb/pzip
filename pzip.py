@@ -68,7 +68,8 @@ class PZip:
     DEFAULT_ITERATIONS = 200000
 
     # Default (approximate) plaintext block size when encrypting. Actaul blocks may be larger or smaller than this.
-    DEFAULT_BLOCK_SIZE = 64 * 2 ** 10
+    # Benchmarking suggests that block sizes in the 256k-1MB range perform best.
+    DEFAULT_BLOCK_SIZE = 2 ** 18  # 256k
 
     class Mode(enum.Enum):
         ENCRYPT = "wb"
@@ -152,7 +153,6 @@ class PZip:
                 key_material = None
         self.counter = 0
         self.buffer = b""
-        self.block_size = block_size or self.DEFAULT_BLOCK_SIZE
         if self.mode == PZip.Mode.ENCRYPT:
             assert self.fileobj.writable()
             self.key_size = key_size or self.DEFAULT_KEY_SIZE
@@ -167,6 +167,7 @@ class PZip:
             if compress:
                 self.flags |= PZip.Flags.COMPRESSED
                 self.compresslevel = zlib.Z_DEFAULT_COMPRESSION if compress is True else int(compress)
+            self.block_size = block_size or self.DEFAULT_BLOCK_SIZE
             self.write_header()
             self.bytes_written = 0
         elif self.mode == PZip.Mode.DECRYPT:
