@@ -38,7 +38,7 @@ class PZipTests(unittest.TestCase):
                 f.write(plaintext)
             self.assertTrue(f.password)
             with self.assertRaises(InvalidFile):
-                TestPZip(buf, PZip.Mode.DECRYPT, password=b"badkey").read_block()
+                TestPZip(buf, PZip.Mode.DECRYPT, b"badkey").read_block()
 
     def test_no_compression(self):
         buf = io.BytesIO()
@@ -73,9 +73,19 @@ class PZipTests(unittest.TestCase):
         with TestPZip(buf, PZip.Mode.DECRYPT) as f:
             self.assertEqual(b"".join(chunk for chunk in f), plaintext)
 
-    def test_bad_header(self):
+    def test_bad_headers(self):
         with self.assertRaises(InvalidFile):
-            TestPZip(io.BytesIO(), PZip.Mode.DECRYPT)
+            TestPZip(io.BytesIO(b"PZ"), PZip.Mode.DECRYPT)
+        bad_headers = [
+            b"PZUP",  # bad magic
+            b"PZIP\x02",  # bad version
+            b"PZIP\x01\x00\x08",  # bad key size
+            b"PZIP\x01\x00\x20\x0c",  # no nonce data
+        ]
+        for bad in bad_headers:
+            pad = b"\x00" * (PZip.HEADER_SIZE - len(bad))
+            with self.assertRaises(InvalidFile):
+                TestPZip(io.BytesIO(bad + pad), PZip.Mode.DECRYPT)
 
     def test_modes(self):
         with self.assertRaises(ValueError):
@@ -144,6 +154,9 @@ class CommandLineTests(unittest.TestCase):
         getpass.return_value = "secret"
         plaintext = b"I am a real file."
         with tempfile.TemporaryDirectory() as root:
+            keyfile = os.path.join(root, "keyfile")
+            with open(keyfile, "wb") as f:
+                f.write(os.urandom(32))
             name = os.path.join(root, "tempfile")
             with open(name, "wb") as f:
                 f.write(plaintext)
@@ -163,6 +176,9 @@ class CommandLineTests(unittest.TestCase):
             main("-q", name + ".pz")
             self.assertTrue(os.path.exists(name))
             self.assertFalse(os.path.exists(name + ".pz"))
+            # Test encryption using a keyfile.
+            main("-q", "--key", keyfile, name)
+            main("-q", "--key", keyfile, name + ".pz")
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)
             main("-q", "-i1", "-o", name + ".enc", name)
