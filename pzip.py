@@ -326,9 +326,10 @@ class PZip:
         if self.mode != PZip.Mode.ENCRYPT:
             raise io.UnsupportedOperation()
         self.buffer += data
-        while len(self.buffer) >= self.block_size:
-            self.write_block(self.buffer[:self.block_size])
-            self.buffer = self.buffer[self.block_size:]
+        block_size = self.block_size  # Work around black's silly slice spacing.
+        while len(self.buffer) >= block_size:
+            self.write_block(self.buffer[:block_size])
+            self.buffer = self.buffer[block_size:]
         return len(data)
 
     def flush(self):
