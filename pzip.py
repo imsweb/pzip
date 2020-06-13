@@ -326,9 +326,9 @@ class PZip:
         if self.mode != PZip.Mode.ENCRYPT:
             raise io.UnsupportedOperation()
         self.buffer += data
-        if len(self.buffer) >= self.block_size:
-            self.write_block(self.buffer)
-            self.buffer = b""
+        while len(self.buffer) >= self.block_size:
+            self.write_block(self.buffer[:self.block_size])
+            self.buffer = self.buffer[self.block_size:]
         return len(data)
 
     def flush(self):
