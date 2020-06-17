@@ -54,8 +54,9 @@ class PZip:
     # nonce size, in bytes (1 bytes)
     # kdf salt (16 bytes)
     # kdf iterations (4 bytes)
+    # reserved (4 bytes)
     # plaintext size (8 bytes)
-    HEADER_FORMAT = "!{}sBBBB16sLQ".format(len(MAGIC))
+    HEADER_FORMAT = "!{}sBBBB16sLLQ".format(len(MAGIC))
     HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
     # 256-bit AES keys by default.
@@ -233,6 +234,7 @@ class PZip:
                 self.nonce_size,
                 self.salt,
                 self.iterations if self.password else 0,
+                0,  # reserved
                 self.size or 0,
             )
         )
@@ -253,6 +255,7 @@ class PZip:
             self.nonce_size,
             self.salt,
             self.iterations,
+            _reserved,
             self.size,
         ) = struct.unpack(self.HEADER_FORMAT, data)
         if magic != self.MAGIC:

@@ -97,7 +97,7 @@ gzip data using `decompress=False` or the `--extract` option of the CLI.
 
 ## File Format
 
-The PZip file format consists of a 36-byte header, followed by a variable-size nonce in plaintext, immediately followed
+The PZip file format consists of a 40-byte header, followed by a variable-size nonce in plaintext, immediately followed
 by one or more blocks. Each block begins with a 4-byte big endian unsigned integer block size `S`, followed by `S`
 encrypted bytes, ending with a 16-byte authentication tag. The header is big endian, with the following fields/sizes:
 
@@ -110,6 +110,7 @@ encrypted bytes, ending with a 16-byte authentication tag. The header is big end
   * Nonce size (in bytes), 1 byte - 12 by default, may be larger
   * KDF salt (16 bytes)
   * KDF iterations (4 bytes, unsigned int/long) - currently unused if key material was not a password
+  * Reserved for future use (4 bytes)
   * Plaintext length (8 bytes, unsigned long long) - optional, may be set to 0
 
 Below is an example of a PZip file containing the plaintext "hello world", encrypted with a key derived from the string
@@ -126,6 +127,7 @@ Below is an example of a PZip file containing the plaintext "hello world", encry
 | 0C                                              | 1    | 12       | Nonce size         |
 | 08 6F 58 74 1C 96 B2 C2 7A 8D A2 71 64 22 70 2A | 16   | <salt>   | KDF salt           |
 | 00 03 0d 40                                     | 4    | 200000   | KDF iterations     |
+| 00 00 00 00                                     | 4    | 0        | Reserved           |
 | 00 00 00 00 00 00 00 0B                         | 8    | 11       | Plaintext length   |
 +-------------------------------------------------+------+----------+--------------------+
 | 92 66 AE A5 5A 27 21 04 30 B6 08 6F             | 12   | <nonce>  | Nonce              |
@@ -145,9 +147,9 @@ You can verify the above example in Python:
 ```python
 >>> import binascii, io, pzip
 >>> data = binascii.unhexlify(
-...     "505A49500102200C086F58741C96B2C27A8DA2716422702A00030D40000000000000000B9266AEA55A27"
-...     "210430B6086F000000152D9C7FF9665B9C444C78DA54E0529422035CC1FD930000001682E078BEFEA66C"
-...     "5BA96A066979E8506D27C3610B2F8E"
+...     "505A49500102200C086F58741C96B2C27A8DA2716422702A00030D4000000000000000000000000B9266"
+...     "AEA55A27210430B6086F000000152D9C7FF9665B9C444C78DA54E0529422035CC1FD930000001682E078"
+...     "BEFEA66C5BA96A066979E8506D27C3610B2F8E"
 ... )
 >>> pzip.PZip(io.BytesIO(data), "rb", password=b"pzip").read()
 b'hello world'
