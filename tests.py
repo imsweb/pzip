@@ -1,3 +1,4 @@
+import functools
 import gzip
 import io
 import os
@@ -6,27 +7,27 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from pzip import InvalidFile, PZip, main
+import pzip
+import pzip.base
+from pzip.cli import main
 
 TEST_SECRET_KEY = os.urandom(32)
 
+# Mostly for compat with already-written tests, but also a way to do a default key.
+TestPZip = functools.partial(pzip.open, key=pzip.Key(TEST_SECRET_KEY))
 
-class TestPZip(PZip):
-    # Keep the unit tests fast.
-    DEFAULT_ITERATIONS = 1
-
-    def default_key(self):
-        return TEST_SECRET_KEY
+# Speed up the tests.
+pzip.base.DEFAULT_ITERATIONS = 1
 
 
 class PZipTests(unittest.TestCase):
     def test_round_trip(self):
         buf = io.BytesIO()
         plaintext = b"Hello, world!\n" * 1000
-        with TestPZip(buf, PZip.Mode.ENCRYPT) as f:
+        with TestPZip(buf, "wb", append_length=True) as f:
             f.write(plaintext)
         self.assertLess(len(buf.getvalue()), len(plaintext))
-        with TestPZip(buf, PZip.Mode.DECRYPT) as f:
+        with TestPZip(buf, "rb") as f:
             self.assertEqual(f.read(), plaintext)
             self.assertEqual(f.size, len(plaintext))
 
@@ -34,58 +35,58 @@ class PZipTests(unittest.TestCase):
         buf = io.BytesIO()
         plaintext = b"message"
         for compress in (True, False):
-            with TestPZip(buf, PZip.Mode.ENCRYPT, password=b"goodkey", compress=compress) as f:
+            with TestPZip(buf, "wb", key="goodkey", compress=compress) as f:
                 f.write(plaintext)
-            self.assertTrue(f.password)
-            with self.assertRaises(InvalidFile):
-                TestPZip(buf, PZip.Mode.DECRYPT, b"badkey").read_block()
+            self.assertTrue(f.kdf, pzip.KeyDerivation.PBKDF2_SHA256)
+            with self.assertRaises(pzip.InvalidFile):
+                TestPZip(buf, "rb", key=b"badkey").read_block()
 
     def test_no_compression(self):
         buf = io.BytesIO()
         plaintext = b"My voice is my passport. Verify me."
-        with TestPZip(buf, PZip.Mode.ENCRYPT, compress=False) as f:
+        with TestPZip(buf, "wb", compress=False) as f:
             f.write(plaintext)
-        with TestPZip(buf, PZip.Mode.DECRYPT) as f:
-            self.assertEqual(f._ciphertext_size(), len(plaintext))
+        with TestPZip(buf, "rb") as f:
+            self.assertEqual(f.ciphertext_size(), len(plaintext))
             self.assertEqual(f.read(), plaintext)
 
     def test_integrity(self):
         plaintext = os.urandom(1024) * 128
         for compress in (False, True):
             buf = io.BytesIO()
-            with TestPZip(buf, PZip.Mode.ENCRYPT, compress=compress) as f:
+            with TestPZip(buf, "wb", compress=compress) as f:
                 f.write(plaintext)
-            # Alter some bytes after the initial nonce check value.
+            # Alter some bytes in the first encrypted block.
             contents = buf.getbuffer()
-            for i in range(50, 100):
-                contents[PZip.HEADER_SIZE + i] = contents[PZip.HEADER_SIZE + i] ^ 128
+            for i in range(f.block_start + 4, f.block_start + 14):
+                contents[i] ^= 128
             # The file should have a valid header and nonce check, but fail upon reading/authentication.
-            with TestPZip(io.BytesIO(contents), PZip.Mode.DECRYPT) as f:
-                with self.assertRaises(InvalidFile):
+            with TestPZip(io.BytesIO(contents), "rb") as f:
+                with self.assertRaises(pzip.InvalidFile):
                     # Cover both compression integrity failures during streaming reads, and authentication failures.
                     f.read(200 if compress else None)
 
-    def test_iter_read(self):
+    def test_iter_read_lines(self):
         buf = io.BytesIO()
-        plaintext = os.urandom(1024) * 1024
-        with TestPZip(buf, PZip.Mode.ENCRYPT, compress=False) as f:
-            f.write(plaintext)
-        with TestPZip(buf, PZip.Mode.DECRYPT) as f:
-            self.assertEqual(b"".join(chunk for chunk in f), plaintext)
+        plaintext = b"Hello, world!\n"
+        for compress in (True, False):
+            with TestPZip(buf, "wb", compress=compress) as f:
+                f.write(plaintext * 100)
+            with TestPZip(buf, "rb") as f:
+                for line in f:
+                    self.assertEqual(line, plaintext)
 
     def test_bad_headers(self):
-        with self.assertRaises(InvalidFile):
-            TestPZip(io.BytesIO(b"PZ"), PZip.Mode.DECRYPT)
+        with self.assertRaises(pzip.InvalidFile):
+            TestPZip(io.BytesIO(b"PZ"), "rb")
         bad_headers = [
-            b"PZUP",  # bad magic
-            b"PZIP\x02",  # bad version
-            b"PZIP\x01\x00\x08",  # bad key size
-            b"PZIP\x01\x00\x20\x0c",  # no nonce data
+            b"PZ",  # bad magic
+            b"\xB6\x9E\x02",  # bad version
         ]
         for bad in bad_headers:
-            pad = b"\x00" * (PZip.HEADER_SIZE - len(bad))
-            with self.assertRaises(InvalidFile):
-                TestPZip(io.BytesIO(bad + pad), PZip.Mode.DECRYPT)
+            pad = b"\x00" * (pzip.PZip.HEADER_SIZE - len(bad))
+            with self.assertRaises(pzip.InvalidFile):
+                TestPZip(io.BytesIO(bad + pad), "rb")
 
     def test_modes(self):
         with self.assertRaises(ValueError):
@@ -96,23 +97,23 @@ class PZipTests(unittest.TestCase):
             self.assertTrue(f.writable())
             self.assertFalse(f.readable())
             self.assertFalse(f.seekable())
-            with self.assertRaises(io.UnsupportedOperation):
+            with self.assertRaises(NotImplementedError):
                 f.read()
         with TestPZip(buf, "rb") as f:
             self.assertTrue(f.readable())
             self.assertFalse(f.writable())
             self.assertFalse(f.seekable())
-            with self.assertRaises(io.UnsupportedOperation):
+            with self.assertRaises(NotImplementedError):
                 f.write(b"")
 
     def test_close_modes(self):
         buf = io.BytesIO()
-        TestPZip(buf, PZip.Mode.ENCRYPT, close=PZip.Close.ALWAYS).close()
+        TestPZip(buf, "wb", close=pzip.Close.ALWAYS).close()
         self.assertTrue(buf.closed)
         buf = io.BytesIO()
-        TestPZip(buf, PZip.Mode.ENCRYPT, close=PZip.Close.NEVER).close()
+        TestPZip(buf, "wb", close=pzip.Close.NEVER).close()
         self.assertFalse(buf.closed)
-        with TestPZip(buf, PZip.Mode.ENCRYPT, close=PZip.Close.REWIND) as f:
+        with TestPZip(buf, "wb", close=pzip.Close.REWIND) as f:
             f.write(b"advance that pointer")
         self.assertFalse(buf.closed)
         self.assertEqual(buf.tell(), 0)
@@ -121,23 +122,24 @@ class PZipTests(unittest.TestCase):
         buf = io.BytesIO()
         plaintext = b"Hello, world!\n"
         num = 1000
-        with TestPZip(buf, PZip.Mode.ENCRYPT) as f:
-            f.write(plaintext * num)
-        with TestPZip(buf, PZip.Mode.DECRYPT) as f:
-            chunks = list(f.chunks(len(plaintext)))
-            self.assertEqual(len(chunks), num)
-            self.assertEqual(b"".join(chunks), plaintext * num)
+        for compress in (True, False):
+            with TestPZip(buf, "wb", compress=compress) as f:
+                f.write(plaintext * num)
+            with TestPZip(buf, "rb") as f:
+                chunks = list(f.chunks(len(plaintext)))
+                self.assertEqual(len(chunks), num)
+                self.assertEqual(b"".join(chunks), plaintext * num)
 
     def test_peek_rewind(self):
         buf = io.BytesIO()
         plaintext = b"Hello, world!\n" * 1000
-        with TestPZip(buf, PZip.Mode.ENCRYPT) as f:
+        with TestPZip(buf, "wb") as f:
             f.write(plaintext)
-        with self.assertRaises(InvalidFile):
+        with self.assertRaises(pzip.InvalidFile):
             # Peeking with a bad key should raise InvalidFile immediately.
-            TestPZip(buf, PZip.Mode.DECRYPT, b"badkey", peek=True)
+            TestPZip(buf, "rb", key=b"badkey", peek=True)
         buf.seek(0)
-        with TestPZip(buf, PZip.Mode.DECRYPT, peek=True) as f:
+        with TestPZip(buf, "rb", peek=True) as f:
             self.assertEqual(f.read(), plaintext)
             f.rewind()
             self.assertEqual(f.read(), plaintext)
@@ -183,9 +185,7 @@ class CommandLineTests(unittest.TestCase):
                 main("-l", name + ".pz")
             self.assertEqual(
                 stdout.getvalue().strip(),
-                "{}: PZip version 1; AES-256; 96-bit nonce; compressed; plaintext size {}".format(
-                    name + ".pz", len(plaintext)
-                ),
+                "{}: PZip version 1; compressed".format(name + ".pz"),
             )
             main("-q", name + ".pz")
             self.assertTrue(os.path.exists(name))
