@@ -184,8 +184,7 @@ class CommandLineTests(unittest.TestCase):
             with redirect("stdout", "") as stdout:
                 main("-l", name + ".pz")
             self.assertEqual(
-                stdout.getvalue().strip(),
-                "{}: PZip version 1; compressed".format(name + ".pz"),
+                stdout.getvalue().strip(), "{}: PZip version 1; compressed".format(name + ".pz"),
             )
             main("-q", name + ".pz")
             self.assertTrue(os.path.exists(name))
