@@ -16,6 +16,9 @@ from .base import (
 from .reader import PZipReader
 from .writer import PZipWriter
 
+__version__ = "0.9.8"
+__version_info__ = tuple(int(num) for num in __version__.split("."))
+
 
 def open(fileobj, mode, *, key=None, **kwargs):
     if isinstance(fileobj, str):

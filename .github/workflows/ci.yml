@@ -18,7 +18,7 @@ jobs:
     - name: black
       run: black --check .
     - name: isort
-      run: isort -c
+      run: isort -qc
 
   test:
     runs-on: ubuntu-latest

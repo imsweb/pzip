@@ -18,7 +18,7 @@ def encode_int(num):
 
 
 class PZipWriter(PZip):
-    def __init__(self, fileobj, key, nonce=None, block_size=None, append_length=False, compress=None, **kwargs):
+    def __init__(self, fileobj, key, nonce=None, block_size=None, append_length=True, compress=None, **kwargs):
         key = KeyMaterial.resolve(key)
         super().__init__(fileobj, **kwargs)
         # Set the KDF that was used, if any.
@@ -68,13 +68,14 @@ class PZipWriter(PZip):
         )
         if num_tags and tag_data:
             self.fileobj.write(tag_data)
+        # This isn't particularly useful when writing files, but is for testing.
         self.block_start = self.HEADER_SIZE + len(tag_data)
 
     def write_block(self, plaintext, last=False):
         """
-        Writes a block of plaintext including the block header (size), after compressing and encrypting it.
+        Writes a block of plaintext including the block header, after compressing and encrypting it.
         """
-        if last and not plaintext:
+        if not plaintext:
             ciphertext = b""
         else:
             self.bytes_written += len(plaintext)
@@ -100,11 +101,19 @@ class PZipWriter(PZip):
         return len(data)
 
     def flush(self, last=False):
+        """
+        Writes any buffered data into a new block. If `last` is `True`, an empty block will be written with the
+        `BlockFlag.LAST` bit set, even if there is no data buffered.
+        """
         if self.buffer or last:
             self.write_block(bytes(self.buffer), last=last)
         self.buffer.clear()
 
     def close(self):
+        """
+        Write any remaining buffered data out, making sure the last block written has the `BlockFlag.LAST` bit set.
+        If `Flag.APPEND_LENGTH` is set, also append the plaintext length to the end of the file.
+        """
         if not self.closed:
             self.flush(last=True)
             if self.append_length:

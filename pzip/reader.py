@@ -7,12 +7,13 @@ from .base import Algorithm, BlockFlag, Compression, Flag, InvalidFile, KeyDeriv
 
 
 class PZipReader(PZip):
-    def __init__(self, fileobj, key, decompress=True, peek=False, **kwargs):
+    def __init__(self, fileobj, key=None, decompress=True, peek=False, **kwargs):
         super().__init__(fileobj, **kwargs)
         # Whether we should decompress data while reading. Set to False to stream out gzip blocks.
         self.decompress = decompress
         # Keep track of how many plaintext bytes were read (N/A when decompress=False).
         self.bytes_read = 0
+        # Set after we read the last block.
         self.eof = False
         # Remember where the first block starts, to be able to rewind the stream if possible.
         self.block_start = None
@@ -37,17 +38,18 @@ class PZipReader(PZip):
             raise InvalidFile("File is not a PZip archive.")
         if self.version != 1:
             raise InvalidFile("Invalid or unknown file version ({}).".format(self.version))
-        self.flags = Flag(flags)
-        self.algorithm = Algorithm(algorithm)
-        self.kdf = KeyDerivation(kdf)
-        self.compression = Compression(compression)
-        self.read_tags(num_tags)
         try:
-            self.block_start = self.fileobj.tell()
-        except (AttributeError, io.UnsupportedOperation):
-            pass
+            self.flags = Flag(flags)
+            self.algorithm = Algorithm(algorithm)
+            self.kdf = KeyDerivation(kdf)
+            self.compression = Compression(compression)
+        except ValueError as e:
+            raise InvalidFile("Invalid header field.") from e
+        num_bytes = self.read_tags(num_tags)
+        self.block_start = self.HEADER_SIZE + num_bytes
 
     def read_tags(self, num_tags):
+        num_bytes = 0
         for num in range(num_tags):
             header = self.fileobj.read(2)
             if len(header) < 2:
@@ -65,14 +67,19 @@ class PZipReader(PZip):
             try:
                 tag = Tag(tag)
             except ValueError:
+                # TODO: log this? make a "strict" option? just ignore?
                 print("Unknown tag: {}".format(tag))
             self.tags[tag] = data
+            num_bytes += length + 2
+        return num_bytes
 
     def read_block(self):
         """
         Reads a full block of ciphertext, including the block header (size), and decrypts/decompresses it to return
         a block of plaintext. Raises InvalidFile if the block could not be authenticated.
         """
+        if self.eof:
+            return b""
         block_header = self.fileobj.read(4)
         if not block_header:
             return b""
@@ -99,7 +106,7 @@ class PZipReader(PZip):
                 if len(size_check) != 8:
                     raise InvalidFile("Error reading appended plaintext length.")
                 size_check = int.from_bytes(size_check, "big")
-                if self.bytes_read != size_check:
+                if self.decompress and self.bytes_read != size_check:
                     raise InvalidFile("Plaintext lengths do not match.")
             self.eof = True
         return plaintext
@@ -133,6 +140,7 @@ class PZipReader(PZip):
         self.fileobj.seek(self.block_start)
         self.bytes_read = 0
         self.counter = 0
+        self.eof = False
         self.buffer.clear()
 
     # These are taken from Django, so this can be used in places where it expects a File object. They are also
@@ -154,8 +162,10 @@ class PZipReader(PZip):
                 break
             yield data
 
-    @property
-    def size(self):
+    def plaintext_size(self):
+        """
+        Calculates the total plaintext size using the most efficient method available (if any).
+        """
         if self.eof:
             return self.bytes_read
         elif self.append_length:
@@ -164,9 +174,9 @@ class PZipReader(PZip):
             size_check = int.from_bytes(self.fileobj.read(8), "big")
             self.fileobj.seek(old_pos)
             return size_check
-        else:
-            return 0
-            raise ValueError("Unable to compute plaintext size for this archive.")
+        elif self.compression.value == 0:
+            return self.ciphertext_size()
+        return None
 
     def ciphertext_size(self):
         """

@@ -1,11 +1,12 @@
+import os
 import re
 
-from setuptools import setup
+from setuptools import find_packages, setup
 
 with open("README.md", "r") as readme:
     long_description = readme.read()
 
-with open("pzip.py", "r") as src:
+with open(os.path.join("pzip", "__init__.py"), "r") as src:
     version = re.match(r'.*__version__ = "(.*?)"', src.read(), re.S).group(1)
 
 setup(
@@ -18,9 +19,10 @@ setup(
     author_email="watsond@imsweb.com",
     url="https://github.com/imsweb/pzip",
     license="MIT",
-    py_modules=["pzip"],
+    packages=find_packages(),
     install_requires=["cryptography", "tqdm"],
-    entry_points={"console_scripts": ["pzip=pzip:main"]},
+    extras_require={"deflate": ["deflate"]},
+    entry_points={"console_scripts": ["pzip=pzip.cli:main"]},
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",

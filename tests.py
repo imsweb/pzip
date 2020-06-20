@@ -29,7 +29,7 @@ class PZipTests(unittest.TestCase):
         self.assertLess(len(buf.getvalue()), len(plaintext))
         with TestPZip(buf, "rb") as f:
             self.assertEqual(f.read(), plaintext)
-            self.assertEqual(f.size, len(plaintext))
+            self.assertEqual(f.plaintext_size(), len(plaintext))
 
     def test_bad_key(self):
         buf = io.BytesIO()
@@ -177,14 +177,15 @@ class CommandLineTests(unittest.TestCase):
             with open(name, "wb") as f:
                 f.write(plaintext)
             # Use 1 iteration for speed.
-            main("-q", "-i1", name)
+            main("-q", name)
             self.assertFalse(os.path.exists(name))
             self.assertTrue(os.path.exists(name + ".pz"))
             # Check the --list option while we have a .pz file written out.
             with redirect("stdout", "") as stdout:
                 main("-l", name + ".pz")
             self.assertEqual(
-                stdout.getvalue().strip(), "{}: PZip version 1; compressed".format(name + ".pz"),
+                stdout.getvalue().strip(),
+                "{}: PZip version 1 | AES-GCM-256 | PBKDF2-SHA256 | GZIP".format(name + ".pz"),
             )
             main("-q", name + ".pz")
             self.assertTrue(os.path.exists(name))
@@ -194,7 +195,7 @@ class CommandLineTests(unittest.TestCase):
             main("-q", "--key", keyfile, name + ".pz")
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)
-            main("-q", "-i1", "-o", name + ".enc", name)
+            main("-q", "-o", name + ".enc", name)
             main("-q", "-x", name + ".enc")
             self.assertTrue(os.path.exists(name + ".gz"))
             with gzip.open(name + ".gz") as gz:
@@ -208,7 +209,7 @@ class CommandLineTests(unittest.TestCase):
         with redirect("stdout") as stdout:
             with redirect("stdin", plaintext):
                 # Encrypt from STDIN, write to STDOUT. Use 1 iteration for speed.
-                main("-z", "-i1", "-c", "-")
+                main("-z", "-c", "-")
         ciphertext = stdout.getvalue()
         with redirect("stdout") as stdout:
             with redirect("stdin", ciphertext):
@@ -223,10 +224,10 @@ class CommandLineTests(unittest.TestCase):
             with open(name, "wb") as f:
                 f.write(plaintext)
             with redirect("stderr", "") as stderr:
-                main("-q", "-i1", "-a", name)
+                main("-q", "-a", name)
                 password = stderr.getvalue().split(": ")[-1].strip()
                 self.assertFalse(password.startswith("-"))
-            main("-q", "-i1", "-p", password, name + ".pz")
+            main("-q", "-p", password, name + ".pz")
             with open(name, "rb") as f:
                 self.assertEqual(f.read(), plaintext)
 

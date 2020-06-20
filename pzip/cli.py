@@ -7,9 +7,9 @@ import sys
 
 import tqdm
 
-import pzip
-
-from .base import DEFAULT_ITERATIONS, InvalidFile
+from .base import DEFAULT_ITERATIONS, InvalidFile, PZip
+from .reader import PZipReader
+from .writer import PZipWriter
 
 
 def log(msg, *args):
@@ -26,7 +26,7 @@ def copy(infile, outfile, progress=None):
     Copies infile to outfile in chunks, optionally updating a progress bar. Closes infile and outfile upon completion,
     if they are not interactive.
     """
-    block_size = getattr(outfile, "block_size", pzip.PZip.DEFAULT_BLOCK_SIZE)
+    block_size = getattr(outfile, "block_size", PZip.DEFAULT_BLOCK_SIZE)
     while True:
         if hasattr(infile, "read_block"):
             chunk = infile.read_block()
@@ -83,11 +83,12 @@ def get_files(filename, mode, key, options):
             if not outfile:
                 outfile = sys.stdout.buffer
         # Wrap the output file in a PZip object.
-        outfile = pzip.open(outfile, mode, key=key, compress=not options.nozip)
+        outfile = PZipWriter(outfile, key, compress=not options.nozip)
     elif mode == "rb":
-        infile = pzip.open(filename or sys.stdin.buffer, mode, key=key, decompress=not options.extract)
+        fileobj = open(filename, mode) if filename else sys.stdin.buffer
+        infile = PZipReader(fileobj, key, decompress=not options.extract)
         # PZip's read will return uncompressed data by default, so this should be the uncompressed plaintext size.
-        total = infile.size
+        total = infile.plaintext_size()
         if not outfile:
             if filename:
                 # If an output wasn't specified, and we have a filename, strip off the last suffix (.pz).
@@ -109,13 +110,13 @@ def get_files(filename, mode, key, options):
 
 def print_info(filename, show_errors=False):
     try:
-        fileobj = sys.stdin.buffer if filename == "-" else filename
-        with pzip.open(fileobj, "rb") as f:
+        fileobj = sys.stdin.buffer if filename == "-" else open(filename, "rb")
+        with PZipReader(fileobj) as f:
             info = "{}: PZip version {}".format(filename, f.version)
-            if f.compression.value:
-                info += "; compressed"
-            if f.size:
-                info += "; plaintext size {}".format(f.size)
+            for field in ("algorithm", "kdf", "compression"):
+                v = getattr(f, field)
+                if v.value:
+                    info += " | " + v.name.replace("_", "-")
             print(info)
     except FileNotFoundError:
         if show_errors:
@@ -167,7 +168,7 @@ def main(*args):
             continue
         elif os.path.exists(filename):
             with open(filename, "rb") as f:
-                file_mode = "rb" if f.read(len(pzip.PZip.MAGIC)) == pzip.PZip.MAGIC else "wb"
+                file_mode = "rb" if f.read(len(PZip.MAGIC)) == PZip.MAGIC else "wb"
             if mode is None:
                 mode = file_mode
             elif mode != file_mode:

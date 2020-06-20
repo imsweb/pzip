@@ -1,21 +1,40 @@
 #!/usr/bin/env python
 
 import enum
-import gzip  # noqa
+import gzip
 import io
 import os
 import struct
 
-import deflate
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-__version__ = "0.9.8"
-__version_info__ = tuple(int(num) for num in __version__.split("."))
-__all__ = ["InvalidFile", "PZip", "Algorithm", "Tag", "KeyDerivation", "Compression", "Close"]
+try:
+    import deflate
+
+    gzip_compress = deflate.gzip_compress
+    gzip_decompress = deflate.gzip_decompress
+except ImportError:
+    gzip_compress = gzip.compress
+    gzip_decompress = gzip.decompress
+
+
+__all__ = [
+    "InvalidFile",
+    "PZip",
+    "Algorithm",
+    "Tag",
+    "KeyDerivation",
+    "Compression",
+    "Close",
+    "KeyMaterial",
+    "RawKey",
+    "Key",
+    "Password",
+]
 
 
 class InvalidFile(Exception):
@@ -135,19 +154,20 @@ class Compression(enum.IntEnum):
         raise TypeError("Unknown compression type.")
 
     def __call__(self, level=None):
+        # Allows for Compression.GZIP(level)
         return (self, level)
 
     def compress(self, data, level=None):
         if self == Compression.NONE:
             return data
         elif self == Compression.GZIP:
-            return deflate.gzip_compress(data, level)
+            return gzip_compress(data, level)
 
     def decompress(self, data):
         if self == Compression.NONE:
             return data
         elif self == Compression.GZIP:
-            return deflate.gzip_decompress(data)
+            return gzip_decompress(data)
 
 
 class Close(enum.Enum):
@@ -174,11 +194,6 @@ class Close(enum.Enum):
             fileobj.seek(0)
 
 
-def xor_bytes(a, b):
-    assert len(a) == len(b)
-    return bytes([_a ^ _b for _a, _b in zip(a, b)])
-
-
 class KeyMaterial:
     kdf = KeyDerivation.NONE
 
@@ -195,7 +210,7 @@ class KeyMaterial:
             return Password(arg)
         elif isinstance(arg, bytes):
             return Key(arg)
-        raise TypeError("Unknown key material type.")
+        raise TypeError("Unknown key material type ({}).".format(arg.__class__.__name__))
 
     def get_tags(self):
         return self.kdf.get_tags(**self.kdf_kwargs)
@@ -261,11 +276,15 @@ class PZip(io.RawIOBase):
         The nonce for block number B with original nonce N is essentially N^B, where B is a 32-bit unsigned big-endian
         integer, left-padded to the length of N with zero bytes.
         """
-        nonce = self.tags[Tag.NONCE]
-        counter_bytes = (b"\x00" * (len(nonce) - 4)) + struct.pack("!L", self.counter)
+        nonce = bytearray(self.tags[Tag.NONCE])
+        ctr = struct.pack("!L", self.counter)
+        i = len(nonce) - len(ctr)
+        for c in range(len(ctr)):
+            nonce[i + c] ^= ctr[c]
         self.counter += 1
-        return xor_bytes(nonce, counter_bytes)
+        return bytes(nonce)
 
     def close(self):
-        self.close_mode.close(self.fileobj)
+        if not self.closed:
+            self.close_mode.close(self.fileobj)
         super().close()
