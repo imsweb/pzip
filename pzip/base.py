@@ -104,6 +104,8 @@ class KeyDerivation(enum.IntEnum):
         return {}
 
     def derive(self, key, algorithm, tags):
+        if isinstance(key, (memoryview, bytearray)):
+            key = bytes(key)
         if not self.value:
             assert isinstance(key, bytes)
             assert len(key, algorithm.key_length())
@@ -208,7 +210,7 @@ class KeyMaterial:
             return arg
         elif isinstance(arg, str):
             return Password(arg)
-        elif isinstance(arg, bytes):
+        elif isinstance(arg, (bytes, bytearray, memoryview)):
             return Key(arg)
         raise TypeError("Unknown key material type ({}).".format(arg.__class__.__name__))
 
