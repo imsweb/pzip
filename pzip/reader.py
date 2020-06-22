@@ -49,6 +49,9 @@ class PZipReader(PZip):
         self.block_start = self.HEADER_SIZE + num_bytes
 
     def read_tags(self, num_tags):
+        """
+        Reads tag data and returns how much data was read.
+        """
         num_bytes = 0
         for num in range(num_tags):
             header = self.fileobj.read(2)
@@ -82,6 +85,7 @@ class PZipReader(PZip):
             return b""
         block_header = self.fileobj.read(4)
         if not block_header:
+            self.eof = True
             return b""
         if len(block_header) != 4:
             raise InvalidFile("Error reading header for block {}.".format(self.counter))
@@ -135,6 +139,7 @@ class PZipReader(PZip):
         Rewinds to the first block, clears the read buffer, and resets the counter. Will raise an exception if the
         underlying file object is not seekable.
         """
+        self._checkClosed()
         if not self.block_start:
             raise io.UnsupportedOperation("Cannot rewind; stream is not seekable.")
         self.fileobj.seek(self.block_start)
@@ -150,6 +155,7 @@ class PZipReader(PZip):
         return True
 
     def chunks(self, chunk_size=None):
+        self._checkClosed()
         try:
             # Django's File object resets to the beginning if possible, so we will too.
             self.rewind()
@@ -169,6 +175,7 @@ class PZipReader(PZip):
         if self.eof:
             return self.bytes_read
         elif self.append_length:
+            self._checkClosed()
             old_pos = self.fileobj.tell()
             self.fileobj.seek(-8, 2)
             size_check = int.from_bytes(self.fileobj.read(8), "big")
@@ -183,6 +190,7 @@ class PZipReader(PZip):
         Calculates the total ciphertext size, minus block headers and authentication tags. Will raise an exception if
         the underlying file object is not seekable.
         """
+        self._checkClosed()
         # Remember where we were, so we can reset the file position when we're done.
         old_pos = self.fileobj.tell()
         # Start reading at the first block header.

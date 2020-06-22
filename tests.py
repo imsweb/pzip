@@ -16,7 +16,7 @@ TEST_SECRET_KEY = os.urandom(32)
 # Mostly for compat with already-written tests, but also a way to do a default key.
 TestPZip = functools.partial(pzip.open, key=pzip.Key(TEST_SECRET_KEY))
 
-# Speed up the tests.
+# Speed up the password tests.
 pzip.base.DEFAULT_ITERATIONS = 1
 
 
@@ -24,7 +24,7 @@ class PZipTests(unittest.TestCase):
     def test_round_trip(self):
         buf = io.BytesIO()
         plaintext = b"Hello, world!\n" * 1000
-        with TestPZip(buf, "wb", append_length=True) as f:
+        with TestPZip(buf, "wb") as f:
             f.write(plaintext)
         self.assertLess(len(buf.getvalue()), len(plaintext))
         with TestPZip(buf, "rb") as f:
@@ -60,7 +60,7 @@ class PZipTests(unittest.TestCase):
             contents = buf.getbuffer()
             for i in range(f.block_start + 4, f.block_start + 14):
                 contents[i] ^= 128
-            # The file should have a valid header and nonce check, but fail upon reading/authentication.
+            # The file should have a valid header, but fail upon reading/authentication.
             with TestPZip(io.BytesIO(contents), "rb") as f:
                 with self.assertRaises(pzip.InvalidFile):
                     # Cover both compression integrity failures during streaming reads, and authentication failures.
@@ -82,6 +82,9 @@ class PZipTests(unittest.TestCase):
         bad_headers = [
             b"PZ",  # bad magic
             b"\xB6\x9E\x02",  # bad version
+            b"\xB6\x9E\x01\x00\x02",  # bad algorithm
+            b"\xB6\x9E\x01\x00\x01\x03",  # bad kdf
+            b"\xB6\x9E\x01\x00\x01\x01\x02",  # bad compression
         ]
         for bad in bad_headers:
             pad = b"\x00" * (pzip.PZip.HEADER_SIZE - len(bad))
@@ -143,6 +146,17 @@ class PZipTests(unittest.TestCase):
             self.assertEqual(f.read(), plaintext)
             f.rewind()
             self.assertEqual(f.read(), plaintext)
+
+    def test_tags(self):
+        buf = io.BytesIO()
+        plaintext = b"Hello, world!\n" * 100
+        with TestPZip(buf, "wb") as f:
+            f.tags[pzip.Tag.FILENAME] = b"hello.txt"
+            f.tags[pzip.Tag.COMMENT] = b"this is a test"
+            f.write(plaintext)
+        with TestPZip(buf, "rb") as f:
+            self.assertTrue(f.tags[pzip.Tag.FILENAME], b"hello.txt")
+            self.assertTrue(f.tags[pzip.Tag.COMMENT], b"this is a test")
 
 
 class redirect:

@@ -267,9 +267,6 @@ class PZip(io.RawIOBase):
         key = self.kdf.derive(material, self.algorithm, self.tags)
         self.cipher = self.algorithm.initialize(key, self.tags)
 
-    def finalize(self):
-        pass
-
     def next_nonce(self):
         """
         Computes the next block nonce, based on the original nonce and current counter, then increments the counter.

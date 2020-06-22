@@ -1,0 +1,10 @@
+site_name: PZip
+theme: material
+nav:
+    - Home: index.md
+    - Encryption: encryption.md
+    - File Format: format.md
+markdown_extensions:
+    - codehilite
+repo_name: imsweb/pzip
+repo_url: https://github.com/imsweb/pzip

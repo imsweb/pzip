@@ -36,7 +36,8 @@ class PZipWriter(PZip):
         self.bytes_written = 0
         # Initialize the cipher.
         self.initialize(key)
-        self.write_header()
+        # This is set when writing the header (lazily).
+        self.block_start = None
 
     def writable(self):
         return True
@@ -75,6 +76,8 @@ class PZipWriter(PZip):
         """
         Writes a block of plaintext including the block header, after compressing and encrypting it.
         """
+        if self.block_start is None:
+            self.write_header()
         if not plaintext:
             ciphertext = b""
         else:
