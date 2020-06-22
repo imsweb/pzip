@@ -4,6 +4,9 @@
 
 PZip is an encrypted file format (with optional compression), a command-line tool, and a Python file-like interface.
 
+[PZip Documentation](https://imsweb.github.io/pzip/)
+
+
 ## Installation
 
 PZip is available on [PyPI](https://pypi.org/project/pzip/):
