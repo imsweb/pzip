@@ -20,7 +20,7 @@ class PZipReader(PZip):
         self.read_header()
         if key:
             self.initialize(key)
-        if peek:
+        if peek and key:
             self.buffer.extend(self.read_block())
 
     def readable(self):

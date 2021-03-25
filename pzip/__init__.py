@@ -16,12 +16,12 @@ from .base import (
 from .reader import PZipReader
 from .writer import PZipWriter
 
-__version__ = "0.9.8"
+__version__ = "0.9.9"
 __version_info__ = tuple(int(num) for num in __version__.split("."))
 
 
-def open(fileobj, mode, *, key=None, **kwargs):
-    if isinstance(fileobj, str):
+def open(fileobj, mode="rb", *, key=None, **kwargs):
+    if isinstance(fileobj, (str, int)):
         fileobj = builtins.open(fileobj, mode)
     if "r" in mode:
         return PZipReader(fileobj, key, **kwargs)

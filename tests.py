@@ -102,6 +102,9 @@ class PZipTests(unittest.TestCase):
             self.assertFalse(f.seekable())
             with self.assertRaises(NotImplementedError):
                 f.read()
+        # Test that mode defaults to "rb"
+        with pzip.open(buf) as f:
+            self.assertIsInstance(f, pzip.PZipReader)
         with TestPZip(buf, "rb") as f:
             self.assertTrue(f.readable())
             self.assertFalse(f.writable())
