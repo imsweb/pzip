@@ -7,7 +7,7 @@ import sys
 
 import tqdm
 
-from .base import DEFAULT_ITERATIONS, InvalidFile, PZip
+from .base import InvalidFile, PZip
 from .reader import PZipReader
 from .writer import PZipWriter
 
@@ -171,13 +171,6 @@ def main(*args):
     )
     parser.add_argument("-e", "--key", help="encrypt/decrypt using key file")
     parser.add_argument("-p", "--password", help="encrypt/decrypt using password")
-    parser.add_argument(
-        "-i",
-        "--iterations",
-        type=int,
-        default=DEFAULT_ITERATIONS,
-        help="number of PBKDF2 iterations",
-    )
     parser.add_argument("-o", "--output", help="specify outfile file name")
     parser.add_argument(
         "-n",
@@ -269,7 +262,11 @@ def main(*args):
         infile, outfile, total = get_files(filename, mode, key, options)
         progress = (
             tqdm.tqdm(
-                desc=filename, total=total, unit="B", unit_scale=True, unit_divisor=1024
+                desc=filename,
+                total=total,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
             )
             if filename and total and not options.quiet
             else None
