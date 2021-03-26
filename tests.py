@@ -63,7 +63,8 @@ class PZipTests(unittest.TestCase):
             # The file should have a valid header, but fail upon reading/authentication.
             with TestPZip(io.BytesIO(contents), "rb") as f:
                 with self.assertRaises(pzip.InvalidFile):
-                    # Cover both compression integrity failures during streaming reads, and authentication failures.
+                    # Cover both compression integrity failures during streaming reads,
+                    # and authentication failures.
                     f.read(200 if compress else None)
 
     def test_iter_read_lines(self):
@@ -202,7 +203,9 @@ class CommandLineTests(unittest.TestCase):
                 main("-l", name + ".pz")
             self.assertEqual(
                 stdout.getvalue().strip(),
-                "{}: PZip version 1 | AES-GCM-256 | PBKDF2-SHA256 | GZIP".format(name + ".pz"),
+                "{}: PZip version 1 | AES-GCM-256 | PBKDF2-SHA256 | GZIP".format(
+                    name + ".pz"
+                ),
             )
             main("-q", name + ".pz")
             self.assertTrue(os.path.exists(name))

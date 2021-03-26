@@ -31,14 +31,22 @@ def bench():
                     for i in range(size // bs):
                         f.write_block(data)
                 elapsed = time.time() - start
-                print("encrypt({}mb, block_size={}k, compress={}): {}".format(mb, bs // 1024, compress, elapsed))
+                print(
+                    "encrypt({}mb, block_size={}k, compress={}): {}".format(
+                        mb, bs // 1024, compress, elapsed
+                    )
+                )
                 # Decrypt
                 start = time.time()
                 with pzip.open(buf, "rb", key=key) as f:
                     for block in f.chunks():
                         assert len(block) == bs
                 elapsed = time.time() - start
-                print("decrypt({}mb, block_size={}k, compress={}): {}\n".format(mb, bs // 1024, compress, elapsed))
+                print(
+                    "decrypt({}mb, block_size={}k, compress={}): {}\n".format(
+                        mb, bs // 1024, compress, elapsed
+                    )
+                )
 
 
 if __name__ == "__main__":

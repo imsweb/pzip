@@ -3,19 +3,30 @@ import struct
 
 from cryptography.exceptions import InvalidTag
 
-from .base import Algorithm, BlockFlag, Compression, Flag, InvalidFile, KeyDerivation, PZip, Tag
+from .base import (
+    Algorithm,
+    BlockFlag,
+    Compression,
+    Flag,
+    InvalidFile,
+    KeyDerivation,
+    PZip,
+    Tag,
+)
 
 
 class PZipReader(PZip):
     def __init__(self, fileobj, key=None, decompress=True, peek=False, **kwargs):
         super().__init__(fileobj, **kwargs)
-        # Whether we should decompress data while reading. Set to False to stream out gzip blocks.
+        # Whether we should decompress data while reading. Set to False to stream out
+        # gzip blocks.
         self.decompress = decompress
         # Keep track of how many plaintext bytes were read (N/A when decompress=False).
         self.bytes_read = 0
         # Set after we read the last block.
         self.eof = False
-        # Remember where the first block starts, to be able to rewind the stream if possible.
+        # Remember where the first block starts, to be able to rewind the stream if
+        # possible.
         self.block_start = None
         self.read_header()
         if key:
@@ -33,11 +44,21 @@ class PZipReader(PZip):
         data = self.fileobj.read(self.HEADER_SIZE)
         if len(data) < self.HEADER_SIZE:
             raise InvalidFile("Invalid PZip header.")
-        (magic, self.version, flags, algorithm, kdf, compression, num_tags) = struct.unpack(self.HEADER_FORMAT, data)
+        (
+            magic,
+            self.version,
+            flags,
+            algorithm,
+            kdf,
+            compression,
+            num_tags,
+        ) = struct.unpack(self.HEADER_FORMAT, data)
         if magic != self.MAGIC:
             raise InvalidFile("File is not a PZip archive.")
         if self.version != 1:
-            raise InvalidFile("Invalid or unknown file version ({}).".format(self.version))
+            raise InvalidFile(
+                "Invalid or unknown file version ({}).".format(self.version)
+            )
         try:
             self.flags = Flag(flags)
             self.algorithm = Algorithm(algorithm)
@@ -60,12 +81,18 @@ class PZipReader(PZip):
             tag, length = struct.unpack("!bB", header)
             data = self.fileobj.read(length)
             if len(data) < length:
-                raise InvalidFile("Error reading tag #{} data (tag={}).".format(num, tag))
+                raise InvalidFile(
+                    "Error reading tag #{} data (tag={}).".format(num, tag)
+                )
             if tag < 0:
                 # High/sign bit set means interpret as an unsigned number.
                 fmt = {1: "!B", 2: "!H", 4: "!L", 8: "!Q"}
                 if length not in fmt:
-                    raise InvalidFile("Invalid integer size ({}) for tag #{} (tag={}).".format(length, num, tag))
+                    raise InvalidFile(
+                        "Invalid integer size ({}) for tag #{} (tag={}).".format(
+                            length, num, tag
+                        )
+                    )
                 data = struct.unpack(fmt[length], data)[0]
             try:
                 tag = Tag(tag)
@@ -78,8 +105,9 @@ class PZipReader(PZip):
 
     def read_block(self):
         """
-        Reads a full block of ciphertext, including the block header (size), and decrypts/decompresses it to return
-        a block of plaintext. Raises InvalidFile if the block could not be authenticated.
+        Reads a full block of ciphertext, including the block header (size), and
+        decrypts/decompresses it to return a block of plaintext. Raises InvalidFile if
+        the block could not be authenticated.
         """
         if self.eof:
             return b""
@@ -117,7 +145,8 @@ class PZipReader(PZip):
 
     def read(self, size=-1):
         """
-        Reads an arbitrary amount of data, buffering any unread bytes of the last read block.
+        Reads an arbitrary amount of data, buffering any unread bytes of the last read
+        block.
         """
         read_all = size is None or size < 0
         while read_all or (len(self.buffer) < size):
@@ -136,8 +165,8 @@ class PZipReader(PZip):
 
     def rewind(self):
         """
-        Rewinds to the first block, clears the read buffer, and resets the counter. Will raise an exception if the
-        underlying file object is not seekable.
+        Rewinds to the first block, clears the read buffer, and resets the counter. Will
+        raise an exception if the underlying file object is not seekable.
         """
         self._checkClosed()
         if not self.block_start:
@@ -148,8 +177,9 @@ class PZipReader(PZip):
         self.eof = False
         self.buffer.clear()
 
-    # These are taken from Django, so this can be used in places where it expects a File object. They are also
-    # generally useful to be able to stream a file with a specified chunk size.
+    # These are taken from Django, so this can be used in places where it expects a File
+    # object. They are also generally useful to be able to stream a file with a
+    # specified chunk size.
 
     def multiple_chunks(self, chunk_size=None):
         return True
@@ -170,7 +200,8 @@ class PZipReader(PZip):
 
     def plaintext_size(self):
         """
-        Calculates the total plaintext size using the most efficient method available (if any).
+        Calculates the total plaintext size using the most efficient method available
+        (if any).
         """
         if self.eof:
             return self.bytes_read
@@ -187,8 +218,8 @@ class PZipReader(PZip):
 
     def ciphertext_size(self):
         """
-        Calculates the total ciphertext size, minus block headers and authentication tags. Will raise an exception if
-        the underlying file object is not seekable.
+        Calculates the total ciphertext size, minus block headers and authentication
+        tags. Will raise an exception if the underlying file object is not seekable.
         """
         self._checkClosed()
         # Remember where we were, so we can reset the file position when we're done.
@@ -199,7 +230,7 @@ class PZipReader(PZip):
         while True:
             block_header = self.fileobj.read(4)
             if not block_header:
-                # No more blocks, reset the file position and return the total size thus far.
+                # No more blocks, reset the file position and return the total.
                 self.fileobj.seek(old_pos)
                 return total
             block_flags = BlockFlag(block_header[0])

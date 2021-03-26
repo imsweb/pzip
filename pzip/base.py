@@ -180,7 +180,8 @@ class Close(enum.Enum):
 
     def close(self, fileobj):
         if self == Close.AUTOMATIC:
-            # Rewind (and leave open) if the fileobj is a BytesIO, otherwise close unless it's interactive.
+            # Rewind (and leave open) if the fileobj is a BytesIO, otherwise close
+            # unless it's interactive.
             if isinstance(fileobj, io.BytesIO):
                 fileobj.seek(0)
             elif not fileobj.isatty():
@@ -212,7 +213,9 @@ class KeyMaterial:
             return Password(arg)
         elif isinstance(arg, (bytes, bytearray, memoryview)):
             return Key(arg)
-        raise TypeError("Unknown key material type ({}).".format(arg.__class__.__name__))
+        raise TypeError(
+            "Unknown key material type ({}).".format(arg.__class__.__name__)
+        )
 
     def get_tags(self):
         return self.kdf.get_tags(**self.kdf_kwargs)
@@ -246,7 +249,10 @@ class PZip(io.RawIOBase):
     DEFAULT_BLOCK_SIZE = 2 ** 18  # 256k
 
     def __init__(
-        self, fileobj, name=None, close=Close.AUTOMATIC,
+        self,
+        fileobj,
+        name=None,
+        close=Close.AUTOMATIC,
     ):
         self.version = 1
         self.flags = Flag(0)
@@ -271,9 +277,10 @@ class PZip(io.RawIOBase):
 
     def next_nonce(self):
         """
-        Computes the next block nonce, based on the original nonce and current counter, then increments the counter.
-        The nonce for block number B with original nonce N is essentially N^B, where B is a 32-bit unsigned big-endian
-        integer, left-padded to the length of N with zero bytes.
+        Computes the next block nonce, based on the original nonce and current counter,
+        then increments the counter. The nonce for block number B with original nonce N
+        is essentially N^B, where B is a 32-bit unsigned big-endian integer, left-padded
+        to the length of N with zero bytes.
         """
         nonce = bytearray(self.tags[Tag.NONCE])
         ctr = struct.pack("!L", self.counter)
