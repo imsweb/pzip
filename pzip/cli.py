@@ -5,7 +5,12 @@ import os
 import secrets
 import sys
 
-import tqdm
+try:
+    import tqdm
+
+    has_tqdm = True
+except ImportError:
+    has_tqdm = False
 
 from .base import InvalidFile, PZip
 from .reader import PZipReader
@@ -268,7 +273,7 @@ def main(*args):
                 unit_scale=True,
                 unit_divisor=1024,
             )
-            if filename and total and not options.quiet
+            if has_tqdm and filename and total and not options.quiet
             else None
         )
         copy(infile, outfile, progress=progress)

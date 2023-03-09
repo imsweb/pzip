@@ -7,11 +7,11 @@ def encode_int(num):
     """
     Space-efficient integer encoding for tags.
     """
-    if num < 2 ** 8:
+    if num < 2**8:
         return struct.pack("!B", num)
-    elif num < 2 ** 16:
+    elif num < 2**16:
         return struct.pack("!H", num)
-    elif num < 2 ** 32:
+    elif num < 2**32:
         return struct.pack("!L", num)
     else:
         return struct.pack("!Q", num)
@@ -95,7 +95,7 @@ class PZipWriter(PZip):
             data = self.compression.compress(plaintext, self.compresslevel)
             ciphertext = self.cipher.encrypt(self.next_nonce(), data, None)
         # The first 8 bits of the header are flags, the last 24 bits are the length.
-        assert len(ciphertext) < 2 ** 24
+        assert len(ciphertext) < 2**24
         header = bytearray(struct.pack("!L", len(ciphertext)))
         header[0] = BlockFlag.LAST if last else 0
         self.fileobj.write(header)

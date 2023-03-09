@@ -20,11 +20,15 @@ setup(
     url="https://github.com/imsweb/pzip",
     license="MIT",
     packages=find_packages(),
-    install_requires=["cryptography", "tqdm"],
-    extras_require={"deflate": ["deflate"]},
+    install_requires=["cryptography"],
+    extras_require={
+        "deflate": ["deflate"],
+        "tqdm": ["tqdm"],
+        "all": ["deflate", "tqdm"],
+    },
     entry_points={"console_scripts": ["pzip=pzip.cli:main"]},
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python",

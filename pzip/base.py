@@ -246,7 +246,7 @@ class PZip(io.RawIOBase):
 
     # Default plaintext block size when encrypting.
     # Benchmarking suggests that block sizes in the 256k-1MB range perform best.
-    DEFAULT_BLOCK_SIZE = 2 ** 18  # 256k
+    DEFAULT_BLOCK_SIZE = 2**18  # 256k
 
     def __init__(
         self,

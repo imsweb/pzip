@@ -6,32 +6,32 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.x'
-    - name: Install Checkers
-      run: pip install flake8 black isort
-    - name: flake8
-      run: flake8
-    - name: black
-      run: black --check .
-    - name: isort
-      run: isort --check .
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: Install Checkers
+        run: pip install flake8 black isort
+      - name: flake8
+        run: flake8
+      - name: black
+        run: black --check .
+      - name: isort
+        run: isort --check .
 
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.6, 3.7, 3.8, 3.9]
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11"]
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install Requirements
-      run: pip install cryptography tqdm
-    - name: Run Tests
-      run: python tests.py
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Requirements
+        run: pip install cryptography
+      - name: Run Tests
+        run: python tests.py
