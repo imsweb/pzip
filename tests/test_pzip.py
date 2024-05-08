@@ -82,10 +82,10 @@ class PZipTests(unittest.TestCase):
             TestPZip(io.BytesIO(b"PZ"), "rb")
         bad_headers = [
             b"PZ",  # bad magic
-            b"\xB6\x9E\x02",  # bad version
-            b"\xB6\x9E\x01\x00\x02",  # bad algorithm
-            b"\xB6\x9E\x01\x00\x01\x03",  # bad kdf
-            b"\xB6\x9E\x01\x00\x01\x01\x02",  # bad compression
+            b"\xb6\x9e\x02",  # bad version
+            b"\xb6\x9e\x01\x00\x02",  # bad algorithm
+            b"\xb6\x9e\x01\x00\x01\x03",  # bad kdf
+            b"\xb6\x9e\x01\x00\x01\x01\x02",  # bad compression
         ]
         for bad in bad_headers:
             pad = b"\x00" * (pzip.PZip.HEADER_SIZE - len(bad))

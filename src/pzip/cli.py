@@ -5,13 +5,6 @@ import os
 import secrets
 import sys
 
-try:
-    import tqdm
-
-    has_tqdm = True
-except ImportError:
-    has_tqdm = False
-
 from .base import InvalidFile, PZip
 from .reader import PZipReader
 from .writer import PZipWriter
@@ -265,18 +258,7 @@ def main(*args):
                 die("passwords did not match")
     for filename in files:
         infile, outfile, total = get_files(filename, mode, key, options)
-        progress = (
-            tqdm.tqdm(
-                desc=filename,
-                total=total,
-                unit="B",
-                unit_scale=True,
-                unit_divisor=1024,
-            )
-            if has_tqdm and filename and total and not options.quiet
-            else None
-        )
-        copy(infile, outfile, progress=progress)
+        copy(infile, outfile)
         if filename and not options.keep:
             os.remove(filename)
 

@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 try:
-    import deflate
+    import deflate  # pyright: ignore[reportMissingImports]
 
     gzip_compress = deflate.gzip_compress
     gzip_decompress = deflate.gzip_decompress
@@ -42,7 +42,7 @@ class InvalidFile(Exception):
 
 
 # Number of PBKDF2 iterations to use by default. May increase over time.
-DEFAULT_ITERATIONS = 200000
+DEFAULT_ITERATIONS = 600_000
 
 
 class Flag(enum.IntFlag):
@@ -235,7 +235,7 @@ class Password(KeyMaterial):
 
 class PZip(io.RawIOBase):
     # First two bytes of any PZIP file.
-    MAGIC = b"\xB6\x9E"  # ¶ž
+    MAGIC = b"\xb6\x9e"  # ¶ž
 
     # PZip header format (for struct):
     # magic, version, flags, algorithm, kdf, compression, #tags
@@ -245,8 +245,8 @@ class PZip(io.RawIOBase):
     HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
     # Default plaintext block size when encrypting.
-    # Benchmarking suggests that block sizes in the 256k-1MB range perform best.
-    DEFAULT_BLOCK_SIZE = 2**18  # 256k
+    # Benchmarking suggests that block sizes in the 128k-1MB range perform best.
+    DEFAULT_BLOCK_SIZE = 2**17  # 128k
 
     def __init__(
         self,

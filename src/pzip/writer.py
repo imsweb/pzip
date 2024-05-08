@@ -26,7 +26,7 @@ class PZipWriter(PZip):
         block_size=None,
         append_length=True,
         compress=None,
-        **kwargs
+        **kwargs,
     ):
         key = KeyMaterial.resolve(key)
         super().__init__(fileobj, **kwargs)
