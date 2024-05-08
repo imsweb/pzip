@@ -72,7 +72,7 @@ platformdirs==4.2.1
     # via virtualenv
 pluggy==1.5.0
     # via pytest
-pre-commit==3.7.0
+pre-commit==3.5.0
 pycparser==2.22
     # via cffi
 pygments==2.18.0

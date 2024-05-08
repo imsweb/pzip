@@ -38,7 +38,7 @@ dev-dependencies = [
     "pytest-cov>=5.0.0",
     "mkdocs>=1.6.0",
     "mkdocs-material>=9.5.21",
-    "pre-commit>=3.7.0",
+    "pre-commit~=3.5.0",
 ]
 
 [tool.hatch.metadata]
