@@ -4,7 +4,7 @@
 
 PZip uses AES-GCM with 256-bit keys, 96-bit nonces (by default), and 128-bit authentication tags. Keys are derived using one of the following, based on the source key material:
 
-  * PBKDF2-SHA256 with a configurable iteration count (currently 200,000) if the key material is a password
+  * PBKDF2-SHA256 with a configurable iteration count (currently 600,000) if the key material is a password
   * HKDF-SHA256 if the key material is a random key
 
 PZip also has the option to use raw keys with no derivation.

@@ -79,7 +79,7 @@ Tag | Description
 
 ## Encrypted Blocks
 
-PZip files are encrypted in some number of variable-length blocks. By default, PZip uses a block size of 2^18 (256 KB), but this may vary per file, or even per block. Each block is prefixed with a 4-byte header. The first byte is a bitfield of flags:
+PZip files are encrypted in some number of variable-length blocks. By default, PZip uses a block size of 2^17 (128 KB), but this may vary per file, or even per block. Each block is prefixed with a 4-byte header. The first byte is a bitfield of flags:
 
 ### Block Flags
 
