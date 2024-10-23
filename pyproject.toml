@@ -31,8 +31,7 @@ Homepage = "https://github.com/imsweb/pzip"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.rye]
-managed = true
+[tool.uv]
 dev-dependencies = [
     "pytest>=8.2.0",
     "pytest-cov>=5.0.0",
