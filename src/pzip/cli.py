@@ -48,17 +48,11 @@ def copy(infile, outfile, progress=None):
 
 def get_files(filename, mode, key, options):
     """
-    Given an input filename (possibly None for STDIN), a mode (ENCRYPT or DECRYPT), a
-    key, and the command line options, this method will return a tuple:
-
-        (infile, outfile, total)
-
-    Where infile and outfile will be open and ready to read/write, and total is the
-    number of expected bytes to read from infile.
+    Given an input filename (possibly None for STDIN), a mode ("rb", "wb"), a key, and
+    the command line options, this method will return a tuple of (infile, outfile).
     """
     infile = None
     outfile = None
-    total = None
     if options.stdout:
         outfile = sys.stdout.buffer
     elif options.output:
@@ -73,21 +67,16 @@ def get_files(filename, mode, key, options):
                 if not options.force and os.path.exists(filename + ".pz"):
                     die("%s: output file exists", filename + ".pz")
                 outfile = open(filename + ".pz", "wb")
-            # Progress total will be the size of the input file when encrypting.
-            total = os.path.getsize(filename)
         else:
             infile = sys.stdin.buffer
             # If using STDIN and no output was specified, use STDOUT.
             if not outfile:
                 outfile = sys.stdout.buffer
         # Wrap the output file in a PZip object.
-        outfile = PZipWriter(outfile, key, compress=not options.nozip)
+        outfile = PZipWriter(outfile, key, compress=not options.nocompress)
     elif mode == "rb":
         fileobj = open(filename, mode) if filename else sys.stdin.buffer
         infile = PZipReader(fileobj, key, decompress=not options.extract)
-        # PZip's read will return uncompressed data by default, so this should be the
-        # uncompressed plaintext size.
-        total = infile.plaintext_size()
         if not outfile:
             if filename:
                 # If an output wasn't specified, and we have a filename, strip off the
@@ -95,20 +84,15 @@ def get_files(filename, mode, key, options):
                 new_filename = filename.rsplit(".", 1)[0]
                 if options.extract and infile.compression.value != 0:
                     # Special case for when we're just extracting the compressed data,
-                    # add a .gz suffix.
-                    # TODO: get this suffix from the PZip object, in case we add
-                    # compression options.
-                    new_filename += ".gz"
-                    # Set the progress total to the (compressed) ciphertext size, since
-                    # we aren't decompressing.
-                    total = infile.ciphertext_size()
+                    # add a .gz (or whatever) suffix.
+                    new_filename += infile.compression.suffix
                 if not options.force and os.path.exists(new_filename):
                     die("%s: output file exists", new_filename)
                 outfile = open(new_filename, "wb")
             else:
                 # Using STDIN and no output was specified, just dump to STDOUT.
                 outfile = sys.stdout.buffer
-    return infile, outfile, total
+    return infile, outfile
 
 
 def print_info(filename, show_errors=False):
@@ -169,10 +153,10 @@ def main(*args):
     )
     parser.add_argument("-e", "--key", help="encrypt/decrypt using key file")
     parser.add_argument("-p", "--password", help="encrypt/decrypt using password")
-    parser.add_argument("-o", "--output", help="specify outfile file name")
+    parser.add_argument("-o", "--output", help="specify output file name")
     parser.add_argument(
         "-n",
-        "--nozip",
+        "--nocompress",
         action="store_true",
         default=False,
         help="encrypt only, no compression",
@@ -257,7 +241,7 @@ def main(*args):
             if verify != key:
                 die("passwords did not match")
     for filename in files:
-        infile, outfile, total = get_files(filename, mode, key, options)
+        infile, outfile = get_files(filename, mode, key, options)
         copy(infile, outfile)
         if filename and not options.keep:
             os.remove(filename)

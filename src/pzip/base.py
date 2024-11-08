@@ -159,6 +159,12 @@ class Compression(enum.IntEnum):
         # Allows for Compression.GZIP(level)
         return (self, level)
 
+    @property
+    def suffix(self):
+        if self == Compression.GZIP:
+            return ".gz"
+        return ""
+
     def compress(self, data, level=None):
         if self == Compression.NONE:
             return data
@@ -184,7 +190,7 @@ class Close(enum.Enum):
             # unless it's interactive.
             if isinstance(fileobj, io.BytesIO):
                 fileobj.seek(0)
-            elif not fileobj.isatty():
+            elif not fileobj.closed and not fileobj.isatty():
                 fileobj.close()
         elif self == Close.ALWAYS:
             # Always close the underlying fileobj.

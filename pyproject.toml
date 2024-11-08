@@ -21,6 +21,9 @@ classifiers = [
     "Topic :: System :: Archiving :: Compression",
 ]
 
+[project.scripts]
+pzip = "pzip.cli:main"
+
 [project.optional-dependencies]
 deflate = ["deflate"]
 

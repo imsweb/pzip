@@ -2,6 +2,9 @@
 
 * Switched to [uv](https://github.com/astral-sh/uv)
 * Dropped Python 3.8 support, test on Python 3.13
+* Renamed `--nozip` to `--nocompress` in case we ever support non-zlib compression
+* Addressed an issue where `isatty` was potentially called on a file object being
+  garbage-collected (found in testing with 3.13)
 
 
 ## 1.1.0 (2024-05-09)

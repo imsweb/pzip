@@ -103,7 +103,7 @@ class PZipReader(PZip):
             num_bytes += length + 2
         return num_bytes
 
-    def read_block(self):
+    def read_block(self, raw=False):
         """
         Reads a full block of ciphertext, including the block header (size), and
         decrypts/decompresses it to return a block of plaintext. Raises InvalidFile if
@@ -111,18 +111,24 @@ class PZipReader(PZip):
         """
         if self.eof:
             return b""
+
         block_header = self.fileobj.read(4)
-        if not block_header:
-            self.eof = True
-            return b""
         if len(block_header) != 4:
             raise InvalidFile("Error reading header for block {}.".format(self.counter))
+
         block_flags = BlockFlag(block_header[0])
         block_size = int.from_bytes(block_header[1:], "big")
+        ciphertext = b""
+
         if block_size:
             ciphertext = self.fileobj.read(block_size)
             if len(ciphertext) < block_size:
                 raise InvalidFile("Error reading block {} data.".format(self.counter))
+
+        if raw:
+            return ciphertext
+
+        if ciphertext:
             try:
                 plaintext = self.cipher.decrypt(self.next_nonce(), ciphertext, None)
             except InvalidTag as e:
@@ -132,6 +138,7 @@ class PZipReader(PZip):
                 self.bytes_read += len(plaintext)
         else:
             plaintext = b""
+
         if BlockFlag.LAST in block_flags:
             if self.append_length:
                 size_check = self.fileobj.read(8)
@@ -141,6 +148,7 @@ class PZipReader(PZip):
                 if self.decompress and self.bytes_read != size_check:
                     raise InvalidFile("Plaintext lengths do not match.")
             self.eof = True
+
         return plaintext
 
     def read(self, size=-1):
