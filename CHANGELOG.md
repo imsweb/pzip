@@ -1,4 +1,4 @@
-## 1.2.0 (TBD)
+## 1.2.0 (2024-11-08)
 
 * Switched to [uv](https://github.com/astral-sh/uv)
 * Dropped Python 3.8 support, test on Python 3.13
