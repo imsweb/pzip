@@ -1,4 +1,5 @@
 import builtins
+import importlib.metadata
 
 from .base import (
     Algorithm,
@@ -16,8 +17,10 @@ from .base import (
 from .reader import PZipReader
 from .writer import PZipWriter
 
-__version__ = "1.2.0"
-__version_info__ = tuple(int(num) for num in __version__.split("."))
+__version__ = importlib.metadata.version("pzip")
+__version_info__ = tuple(
+    int(num) if num.isdigit() else num for num in __version__.split(".")
+)
 
 
 def open(fileobj, mode="rb", *, key=None, **kwargs):

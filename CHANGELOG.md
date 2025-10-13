@@ -1,3 +1,8 @@
+## 1.3.0 (in development)
+
+* Dropped Python 3.9 support, test on Python 3.14
+
+
 ## 1.2.0 (2024-11-08)
 
 * Switched to [uv](https://github.com/astral-sh/uv)
