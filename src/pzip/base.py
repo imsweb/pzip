@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import enum
 import gzip
 import io
@@ -23,17 +21,17 @@ except ImportError:
 
 
 __all__ = [
-    "InvalidFile",
-    "PZip",
     "Algorithm",
-    "Tag",
-    "KeyDerivation",
-    "Compression",
     "Close",
-    "KeyMaterial",
-    "RawKey",
+    "Compression",
+    "InvalidFile",
     "Key",
+    "KeyDerivation",
+    "KeyMaterial",
+    "PZip",
     "Password",
+    "RawKey",
+    "Tag",
 ]
 
 
@@ -130,7 +128,7 @@ class KeyDerivation(enum.IntEnum):
                 iterations=tags[Tag.KDF_ITERATIONS],
                 backend=default_backend(),
             ).derive(key)
-        raise Exception("Unknown key derivation function.")
+        raise ValueError("Unknown key derivation function.")
 
 
 @enum.unique
@@ -219,9 +217,7 @@ class KeyMaterial:
             return Password(arg)
         elif isinstance(arg, (bytes, bytearray, memoryview)):
             return Key(arg)
-        raise TypeError(
-            "Unknown key material type ({}).".format(arg.__class__.__name__)
-        )
+        raise TypeError(f"Unknown key material type ({arg.__class__.__name__}).")
 
     def get_tags(self):
         return self.kdf.get_tags(**self.kdf_kwargs)

@@ -61,11 +61,13 @@ class PZipTests(unittest.TestCase):
             for i in range(f.block_start + 4, f.block_start + 14):
                 contents[i] ^= 128
             # The file should have a valid header, but fail upon reading/authentication.
-            with TestPZip(io.BytesIO(contents), "rb") as f:
-                with self.assertRaises(pzip.InvalidFile):
-                    # Cover both compression integrity failures during streaming reads,
-                    # and authentication failures.
-                    f.read(200 if compress else None)
+            with (
+                TestPZip(io.BytesIO(contents), "rb") as f,
+                self.assertRaises(pzip.InvalidFile),
+            ):
+                # Cover both compression integrity failures during streaming reads,
+                # and authentication failures.
+                f.read(200 if compress else None)
 
     def test_iter_read_lines(self):
         buf = io.BytesIO()
@@ -225,20 +227,18 @@ class CommandLineTests(unittest.TestCase):
     @patch("getpass.getpass")
     def test_stdin_stdout(self, getpass):
         getpass.return_value = "secret"
-        plaintext = "ƒøôβå®".encode("utf-8")
-        with redirect("stdout") as stdout:
-            with redirect("stdin", plaintext):
-                # Encrypt from STDIN, write to STDOUT. Use 1 iteration for speed.
-                main("-z", "-c", "-")
+        plaintext = "ƒøôβå®".encode()
+        with redirect("stdout") as stdout, redirect("stdin", plaintext):
+            # Encrypt from STDIN, write to STDOUT. Use 1 iteration for speed.
+            main("-z", "-c", "-")
         ciphertext = stdout.getvalue()
-        with redirect("stdout") as stdout:
-            with redirect("stdin", ciphertext):
-                # Decrypt from STDIN, write to STDOUT.
-                main("-d", "-c")
+        with redirect("stdout") as stdout, redirect("stdin", ciphertext):
+            # Decrypt from STDIN, write to STDOUT.
+            main("-d", "-c")
         self.assertEqual(plaintext, stdout.getvalue())
 
     def test_auto_password(self):
-        plaintext = "ƒøôβå®".encode("utf-8")
+        plaintext = "ƒøôβå®".encode()
         with tempfile.TemporaryDirectory() as root:
             name = os.path.join(root, "autofile")
             with open(name, "wb") as f:

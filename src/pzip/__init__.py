@@ -30,7 +30,7 @@ def open(fileobj, mode="rb", *, key=None, **kwargs):
         return PZipReader(fileobj, key, **kwargs)
     elif "w" in mode:
         return PZipWriter(fileobj, key, **kwargs)
-    raise ValueError("Invalid mode: {}".format(mode))
+    raise ValueError(f"Invalid mode: {mode}")
 
 
 __all__ = [
@@ -41,8 +41,8 @@ __all__ = [
     "Key",
     "KeyDerivation",
     "KeyMaterial",
-    "Password",
     "PZip",
+    "Password",
     "RawKey",
     "Tag",
     "open",

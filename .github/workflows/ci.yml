@@ -3,29 +3,29 @@ name: CI
 on: [push, pull_request]
 
 env:
-  UV_SYSTEM_PYTHON: 1
-  UV_PYTHON_DOWNLOADS: never
-  UV_PYTHON_PREFERENCE: only-system
+    UV_SYSTEM_PYTHON: 1
+    UV_PYTHON_DOWNLOADS: never
+    UV_PYTHON_PREFERENCE: only-system
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/ruff-action@v3
+    checks:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - uses: astral-sh/ruff-action@v4.1.0
 
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v6
-      - name: Run Tests
-        run: uv run --frozen pytest
+    test:
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+        steps:
+            - uses: actions/checkout@v7
+            - name: Set up Python ${{ matrix.python-version }}
+              uses: actions/setup-python@v7
+              with:
+                  python-version: ${{ matrix.python-version }}
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v10.3.2
+            - name: Run Tests
+              run: uv run --frozen pytest

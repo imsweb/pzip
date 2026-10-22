@@ -99,7 +99,7 @@ def print_info(filename, show_errors=False):
     try:
         fileobj = sys.stdin.buffer if filename == "-" else open(filename, "rb")
         with PZipReader(fileobj) as f:
-            info = "{}: PZip version {}".format(filename, f.version)
+            info = f"{filename}: PZip version {f.version}"
             for field in ("algorithm", "kdf", "compression"):
                 v = getattr(f, field)
                 if v.value:

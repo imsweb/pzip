@@ -1,6 +1,6 @@
-## 1.3.0 (in development)
+## 1.4.0 (in development)
 
-* Dropped Python 3.9 support, test on Python 3.14
+* Dropped Python 3.9 and 3.10 support, test on Python 3.14 and 3.15
 
 
 ## 1.2.0 (2024-11-08)

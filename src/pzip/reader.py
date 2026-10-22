@@ -56,9 +56,7 @@ class PZipReader(PZip):
         if magic != self.MAGIC:
             raise InvalidFile("File is not a PZip archive.")
         if self.version != 1:
-            raise InvalidFile(
-                "Invalid or unknown file version ({}).".format(self.version)
-            )
+            raise InvalidFile(f"Invalid or unknown file version ({self.version}).")
         try:
             self.flags = Flag(flags)
             self.algorithm = Algorithm(algorithm)
@@ -77,28 +75,24 @@ class PZipReader(PZip):
         for num in range(num_tags):
             header = self.fileobj.read(2)
             if len(header) < 2:
-                raise InvalidFile("Error reading tag #{} header.".format(num))
+                raise InvalidFile(f"Error reading tag #{num} header.")
             tag, length = struct.unpack("!bB", header)
             data = self.fileobj.read(length)
             if len(data) < length:
-                raise InvalidFile(
-                    "Error reading tag #{} data (tag={}).".format(num, tag)
-                )
+                raise InvalidFile(f"Error reading tag #{num} data (tag={tag}).")
             if tag < 0:
                 # High/sign bit set means interpret as an unsigned number.
                 fmt = {1: "!B", 2: "!H", 4: "!L", 8: "!Q"}
                 if length not in fmt:
                     raise InvalidFile(
-                        "Invalid integer size ({}) for tag #{} (tag={}).".format(
-                            length, num, tag
-                        )
+                        f"Invalid integer size ({length}) for tag #{num} (tag={tag})."
                     )
                 data = struct.unpack(fmt[length], data)[0]
             try:
                 tag = Tag(tag)
             except ValueError:
                 # TODO: log this? make a "strict" option? just ignore?
-                print("Unknown tag: {}".format(tag))
+                print(f"Unknown tag: {tag}")
             self.tags[tag] = data
             num_bytes += length + 2
         return num_bytes
@@ -114,7 +108,7 @@ class PZipReader(PZip):
 
         block_header = self.fileobj.read(4)
         if len(block_header) != 4:
-            raise InvalidFile("Error reading header for block {}.".format(self.counter))
+            raise InvalidFile(f"Error reading header for block {self.counter}.")
 
         block_flags = BlockFlag(block_header[0])
         block_size = int.from_bytes(block_header[1:], "big")
@@ -123,7 +117,7 @@ class PZipReader(PZip):
         if block_size:
             ciphertext = self.fileobj.read(block_size)
             if len(ciphertext) < block_size:
-                raise InvalidFile("Error reading block {} data.".format(self.counter))
+                raise InvalidFile(f"Error reading block {self.counter} data.")
 
         if raw:
             return ciphertext
@@ -197,7 +191,7 @@ class PZipReader(PZip):
         try:
             # Django's File object resets to the beginning if possible, so we will too.
             self.rewind()
-        except Exception:
+        except OSError:
             pass
         while True:
             # If chunk_size is not specified, it's more efficient to just yield blocks.
