@@ -26,6 +26,6 @@ jobs:
               with:
                   python-version: ${{ matrix.python-version }}
             - name: Setup uv
-              uses: astral-sh/setup-uv@v10.3.2
+              uses: astral-sh/setup-uv@v10.3.3
             - name: Run Tests
               run: uv run --frozen pytest
